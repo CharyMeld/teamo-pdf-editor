@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import teamoLogo from "../../assets/teamo-logo.png";
 import { getCommand } from "../../commands/registry";
 import { useCommandSearch } from "../../commands/useCommandSearch";
 import { useActiveTab } from "../../hooks/useActiveTab";
@@ -11,17 +12,6 @@ import DropdownMenu from "../ui/DropdownMenu";
 import Icon from "../ui/Icon";
 import IconButton from "../ui/IconButton";
 import StatusIndicator from "../ui/StatusIndicator";
-
-function TeamOMark() {
-  // Original geometric monogram — a stacked "T" on a rounded document tile,
-  // not modeled on any other product's logo.
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <rect x="2" y="2" width="20" height="20" rx="5" className="fill-accent" />
-      <path d="M7 8h10M12 8v8" stroke="white" strokeWidth={2} strokeLinecap="round" />
-    </svg>
-  );
-}
 
 interface CommandSearchProps {
   runHandlers: Record<string, () => void>;
@@ -197,8 +187,9 @@ export default function AppHeader() {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
       <div className="flex shrink-0 items-center gap-2">
-        <TeamOMark />
-        <span className="text-sm font-semibold tracking-tight text-text">TeamO PDF Editor</span>
+        <img src={teamoLogo} alt="TeamO Digital" className="h-6 w-auto" />
+        <span className="h-4 w-px bg-border" aria-hidden="true" />
+        <span className="text-sm font-semibold tracking-tight text-text">PDF Editor</span>
       </div>
 
       <div className="w-56 shrink-0 sm:w-72">
