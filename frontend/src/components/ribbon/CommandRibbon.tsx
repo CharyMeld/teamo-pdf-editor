@@ -80,7 +80,7 @@ export default function CommandRibbon() {
   };
 
   return (
-    <div className="shrink-0 bg-surface">
+    <div className="shrink-0 border-b border-border bg-surface">
       <div className="flex items-stretch justify-between">
         <CommandTabs activeTab={activeTab} onSelect={setActiveTab} />
         {isMobile && (
