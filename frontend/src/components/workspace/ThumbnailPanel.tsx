@@ -1,26 +1,67 @@
+import { useState } from "react";
 import { usePanelVisibility } from "../../hooks/usePanelVisibility";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
+import { usePageSelection } from "../../hooks/usePageSelection";
+import { useWorkingDocument } from "../../hooks/useWorkingDocument";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import EmptyState from "../ui/EmptyState";
 import IconButton from "../ui/IconButton";
+import Spinner from "../ui/Spinner";
 import ThumbnailItem from "./ThumbnailItem";
 
+interface DropTarget {
+  page: number;
+  position: "before" | "after";
+}
+
+/** Computes the real permutation to send to POST .../operations/reorder:
+ * the current 1..N page-position numbers, with `draggedPage` moved to
+ * just before/after `target.page`. This is real reordering math — the
+ * backend's qpdf engine receives exactly this list and rebuilds the PDF's
+ * page order from it (see ARCHITECTURE.md's Phase 3 (backend) section). */
+function computeNewOrder(pageCount: number, draggedPage: number, target: DropTarget): number[] {
+  const order = Array.from({ length: pageCount }, (_, i) => i + 1);
+  const without = order.filter((n) => n !== draggedPage);
+  const targetIndex = without.indexOf(target.page);
+  const insertAt = target.position === "before" ? targetIndex : targetIndex + 1;
+  without.splice(insertAt, 0, draggedPage);
+  return without;
+}
+
 /** LEFT pane: the real page-thumbnail panel — a scrollable list of the
- * document's actual pages (from GET /api/documents/{id}/pages), each a
- * real server-rendered thumbnail image. Clicking one jumps the canvas to
- * that page. While the backend's thumbnail job is still running, pages
- * not yet ready show a real loading state, not a placeholder image. On
- * tablet/mobile this renders as an off-canvas drawer instead of a docked
- * pane. */
+ * document's actual *working-copy* pages (GET .../working/pages, which
+ * falls back to the saved version's real pages when there are no pending
+ * edits — see useWorkingDocument), each a real server-rendered thumbnail
+ * image. Clicking one navigates the canvas and drives real single/multi/
+ * range selection (usePageSelection); dragging one to a new position calls
+ * the real reorder endpoint. While the backend's thumbnail job is still
+ * running, pages not yet ready show a real loading state, not a
+ * placeholder image. On tablet/mobile this renders as an off-canvas drawer
+ * instead of a docked pane. */
 export default function ThumbnailPanel() {
   const isTablet = useMediaQuery(BREAKPOINTS.tablet);
   const { thumbnailOpen, closeThumbnail } = usePanelVisibility();
-  const { document: doc, pages } = useOpenDocument();
+  const { document: doc } = useOpenDocument();
+  const working = useWorkingDocument();
+  const selection = usePageSelection();
   const view = useDocumentViewState();
 
-  const totalPages = doc?.pageCount ?? 0;
-  const readyPageNumbers = new Set(pages.filter((p) => p.thumbnailReady).map((p) => p.pageNumber));
+  const [draggedPage, setDraggedPage] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+
+  const totalPages = working.pageCount;
+  const readyPageNumbers = new Set(working.pages.filter((p) => p.thumbnailReady).map((p) => p.pageNumber));
+  const dragEnabled = !working.busy && totalPages > 1;
+
+  function handleDrop() {
+    if (draggedPage !== null && dropTarget !== null && draggedPage !== dropTarget.page) {
+      const newOrder = computeNewOrder(totalPages, draggedPage, dropTarget);
+      void working.runReorder(newOrder);
+    }
+    setDraggedPage(null);
+    setDropTarget(null);
+  }
 
   const body = (
     <div className="flex h-full flex-col overflow-y-auto bg-surface-muted">
@@ -31,18 +72,39 @@ export default function ThumbnailPanel() {
           description="Thumbnails appear here once a document is loaded."
         />
       ) : (
-        <div className="grid grid-cols-2 gap-2 p-2">
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNumber) => (
-            <ThumbnailItem
-              key={pageNumber}
-              documentId={doc.id}
-              pageNumber={pageNumber}
-              ready={readyPageNumbers.has(pageNumber)}
-              active={view.currentPage === pageNumber}
-              onSelect={view.goToPage}
-            />
-          ))}
-        </div>
+        <>
+          {working.thumbnailsPending && (
+            <div className="flex items-center gap-1.5 border-b border-dashed border-border-strong px-2 py-1.5 text-[10px] text-text-subtle">
+              <Spinner size={10} label="Updating thumbnails" />
+              <span>Updating thumbnails…</span>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2 p-2" onDragLeave={() => setDropTarget(null)}>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNumber) => (
+              <ThumbnailItem
+                key={pageNumber}
+                thumbnailUrl={working.thumbnailUrl(pageNumber)}
+                pageNumber={pageNumber}
+                ready={readyPageNumbers.has(pageNumber)}
+                active={view.currentPage === pageNumber}
+                selected={selection.isSelected(pageNumber)}
+                onNavigate={view.goToPage}
+                onSelectionClick={selection.handleClick}
+                draggable={dragEnabled}
+                onDragStartPage={setDraggedPage}
+                onDragOverPage={(page, beforeMidpoint) =>
+                  setDropTarget({ page, position: beforeMidpoint ? "before" : "after" })
+                }
+                onDropPage={handleDrop}
+                onDragEndPage={() => {
+                  setDraggedPage(null);
+                  setDropTarget(null);
+                }}
+                dropIndicator={dropTarget?.page === pageNumber ? dropTarget.position : null}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

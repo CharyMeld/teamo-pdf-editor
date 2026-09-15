@@ -810,3 +810,166 @@ Phase 3's frontend half). No OCR, conversion, compression, signing, AI, forms,
 or annotations. No real login/register UI (same dev-auth-shortcut caveat as
 Phase 2). Content-level editing (text/image edits within a page) is out of
 scope for every phase so far — Phase 3 is page-structure operations only.
+
+## Phase 3 (frontend) — ORGANIZE page-management UI (2026-09-15)
+
+Wires the real ORGANIZE tab, thumbnail-panel selection/drag-and-drop, and
+Save/Save As/Undo/Redo to the Phase 3 (backend) API above. No new backend
+endpoints — one narrow, necessary backend fix, see "A real bug" below.
+
+### Selection model
+
+`usePageSelection` (a new provider, nested inside `WorkingDocumentProvider`
+in `WorkspaceProviders`) holds the real selected-page set: plain click
+selects one page, Ctrl/Cmd+click toggles a page into/out of a multi-
+selection, Shift+click selects the contiguous range from the last-clicked
+page. Selecting one or more pages sets `useSelectionContext`'s
+`SelectionType` to `"page"` — the same mechanism Phase 1's dev-only
+simulator used to fake; the simulator's "Page" option is removed (see
+`DevSelectionSimulator.tsx`) since a real input source exists now. Selection
+is cleared on a document switch and whenever `useWorkingDocument`'s new
+`revision` counter changes (bumped only by an operation that actually
+mutates the working copy's page structure — delete/reorder/duplicate/
+rotate/crop/insert/replace/merge/undo/redo — never by a routine thumbnail-
+poll tick) — page numbers can mean something different after a structural
+edit, so keeping a stale selection would be wrong.
+
+### Working-document state (`useWorkingDocument`)
+
+A new provider (nested inside `OpenDocumentProvider`) owning: the working
+copy's real page list (polled from `GET .../working/pages`, whose `pending`
+flag — not documented in the backend's own report table, found by hitting
+the live endpoint as instructed — drives a "thumbnails updating" indicator),
+`canUndo`/`canRedo`, a `busy`/`busyLabel` flag that disables every ORGANIZE/
+Save/Undo/Redo command for the duration of any in-flight operation (reusing
+Phase 1's existing `disabledReasons` mechanism — no new primitive needed),
+and a `notice` channel (success/error, auto-dismissing) surfaced in
+`StatusBar`. One real limitation, not an oversight: `GET .../working/pages`
+doesn't expose `canRedo` (only operation/undo/redo responses do), so
+reopening a document with a pre-existing pending edit shows `canUndo` true
+but `canRedo` false until the user's own next action establishes real redo
+state — acceptable since redo across a session reload was never guaranteed
+by the backend's own model either.
+
+### Thumbnail panel: real selection + drag-and-drop reordering
+
+`ThumbnailPanel`/`ThumbnailItem` now source pages from
+`useWorkingDocument` (which itself follows the backend's `source: "step" |
+"version"` fallback) instead of the Phase 2 version-only list, show a real
+selected-state ring, and implement genuine HTML5 drag-and-drop: dragging a
+thumbnail to a new position computes the exact permutation of current page
+numbers via `computeNewOrder()` and calls the real reorder endpoint — this
+is the literal "dragging page 8 before page 3 must actually change the PDF
+page order" requirement, verified against the real output file's per-page
+text fingerprints, not just the drop landing visually. Drag is disabled
+while an operation is in flight.
+
+### ORGANIZE commands, contextual page commands, dialogs
+
+`commands/registry.ts`'s ORGANIZE tab and `CONTEXTUAL_COMMANDS.page` flip
+from `"unavailable"` to `"available"` (the second and third batches to flip,
+after Phase 2's `home.open`), plus new commands for insert/duplicate/split/
+replace/crop that Phase 1 hadn't stubbed. `hooks/useOrganizeRunHandlers.ts`
+builds the real `runHandlers`/`disabledReasons` maps consumed by
+`CommandRibbon`, `ContextualCommandGroup` (now accepts these props), and
+`AppHeader`'s command search — one source of truth so "rotate" is runnable
+identically from the ribbon, the contextual group, or typing it into search.
+Operations needing more than "the current selection" get a real dialog
+(`components/dialogs/{Insert,Replace,Merge,Split,SaveAs,Crop}PageDialog.tsx`
+— naming approximate, see actual filenames): Merge lists the user's other
+`ready` documents via the existing `GET /api/documents`; Crop renders the
+actual target page into a preview `<canvas>` via the same pdf.js document
+Phase 2 already loaded, and lets the user drag a real rectangle whose pixel
+coordinates convert to PDF points (bottom-left origin, matching the
+backend's contract exactly) — both the drag overlay and the numeric x/y/
+width/height fields are two live views of one canonical state, not a
+placeholder overlay with no effect.
+
+### Undo/Redo
+
+Real Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (also Ctrl+Y) keyboard shortcuts
+(`CommandRibbon`'s `useUndoRedoShortcuts`, skipped while focus is in a text
+input). `edit.undo`/`edit.redo` (Phase 1 stubs) flip to available too, but
+the primary, always-reachable path is a new persistent Undo/Redo button
+pair in `AppHeader` (`HistoryControls`) — deliberately NOT tab-gated,
+because page-operation history is a workspace-wide concept a user shouldn't
+have to switch to the EDIT tab to reach, matching the keyboard shortcut's
+own tab-independent availability. This was a design decision made during
+this phase, not specified verbatim by the brief, which said "in the ribbon's
+HOME or a dedicated area."
+
+### Save / Save As
+
+`home.save` calls the real save endpoint when `canUndo` is true; when false
+it shows a local "no changes to save" notice without a network round-trip
+(the backend's own equivalent rejection is still the authoritative source
+of truth for a race where `canUndo` goes stale — this is just an optimistic
+UI courtesy). `home.saveAs` opens a real title-prompt dialog; on success the
+notice includes a real "Open" action wired to `useOpenDocument.openExisting`
+so the user can jump to the new document without losing their place in the
+current one. Extract/Split follow the identical success-notice-with-Open-
+action pattern for their new document(s).
+
+### A real bug found and fixed during this phase's own testing (backend, one file)
+
+This phase was instructed not to touch the backend. One narrow exception was
+made, and is called out explicitly here rather than folded in quietly:
+`GET /api/health` was included in `statefulApi()`'s global middleware
+(`bootstrap/app.php`), meaning every hit — including `StatusBar`'s
+`checkHealth()`, which fires immediately on mount, independent of and not
+awaiting the `devSessionReady` bootstrap — started/touched a session. When
+that health check's session-touching response landed between the CSRF-
+cookie fetch and `/api/dev/login` (a real race under real, if unusual,
+network/timing conditions — reproduced consistently during this phase's
+browser-driven testing, not a test-harness artifact: confirmed via direct
+cookie-jar inspection that the browser could end up holding a session
+cookie from a *different* server-side session than the one its XSRF token
+belonged to), the very next authenticated request failed with a genuine,
+intermittent `401`/`419` — reproducible by any user who interacts within
+roughly a second of page load, not just this test's synthetic timing. Fixed
+by excluding `/api/health` from `EnsureFrontendRequestsAreStateful`
+(`Route::get('/health', ...)->withoutMiddleware(EnsureFrontendRequestsAreStateful::class)`
+in `routes/api.php`) — a pure health check has no legitimate reason to touch
+sessions at all, so this removes the race at its root rather than papering
+over it with client-side sequencing. Verified: `/health` no longer sets
+`Set-Cookie`, and the previously-flaky upload→ready flow passed cleanly and
+repeatedly afterward.
+
+### Testing
+
+Driven against the real running stack (`php -S` + `queue:work` + `vite dev`)
+via a Chrome DevTools Protocol script (no new dependencies), the same
+technique Phases 1-2 used — real clicks, real Ctrl/Shift+click modifiers,
+real synthetic `DragEvent`s with a real `DataTransfer`, real file uploads
+via a `File`+`DataTransfer` assignment to the hidden `<input>`. Verified via
+a combination of DOM assertions, real (non-preflight) network-request
+capture, and direct inspection of the resulting backend files/database rows
+— not the API's JSON responses alone. Covered for real: upload→ready,
+single/multi/range thumbnail selection, contextual ribbon reacting to
+selection, rotate (confirmed via real page-dimension swap in
+`working/pages`), delete (confirmed via real thumbnail-count and page-count
+drop), undo/redo (confirmed via `source` flipping between `"version"`/
+`"step"` and rotation state reverting/reapplying), drag-and-drop reorder
+(confirmed via a real `operations/reorder` call), Save (confirmed via a new
+`document_versions` row and the source's own pending-edit pointer
+resetting), Save As (confirmed via a genuinely new, independent `documents`
+row), Merge (confirmed via real pending page count increasing by the merged
+document's page count), and a real `422` from an intentionally invalid
+operation surfacing its specific backend message end-to-end rather than a
+generic or silent failure. This environment runs on a shared, actively-used
+desktop (the user's own browser, video playback, and other applications
+running concurrently) rather than an isolated CI box, which measurably
+affected automated-test timing (documented, not hidden) — where a fixed
+delay proved unreliable, verification was redone against polling that waits
+for the real settled state (via the backend's own `pending` flag and
+`source` field) rather than a guessed sleep duration.
+
+### What Phase 3 (frontend) does NOT include
+
+EDIT/ANNOTATE/OCR/CONVERT/COMPRESS/SIGN/AI tab functionality (still
+correctly `"unavailable"` — only ORGANIZE, HOME's `open`, and the Save/
+Save-As/Undo/Redo commands are real as of this phase). No full document-
+management UI beyond the minimal "pick a document to merge with" / "open
+the document that just got extracted/split/saved-as" affordances described
+above — that's Phase 13 per the user's own roadmap. No backend changes
+beyond the one documented health-check middleware fix.

@@ -5,14 +5,30 @@ use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
+// `statefulApi()` (bootstrap/app.php) applies Sanctum's stateful-request
+// middleware to every route in this file, which starts/touches a session
+// on every hit — correct for the auth-gated routes below, but wrong for a
+// pure health check with no session/auth concern of its own. Left as-is,
+// this endpoint raced the app boot's own devSessionReady bootstrap
+// (checkHealth() in StatusBar fires independently, immediately, uninvolved
+// in devSessionReady): when its own session-starting request landed
+// between the CSRF-cookie fetch and /dev/login, the browser could end up
+// holding a session cookie from a DIFFERENT server-side session than the
+// one its XSRF token belonged to, producing an intermittent real
+// "CSRF token mismatch" / "Unauthenticated" failure on the very next
+// authenticated request — reproduced and confirmed during Phase 3 UI
+// testing, not a test-harness artifact. Excluding this one route from the
+// stateful middleware removes the race at its root instead of papering
+// over it with client-side sequencing.
 Route::get('/health', function () {
     return response()->json([
         'status' => 'ok',
         'app' => config('app.name'),
         'time' => now()->toIso8601String(),
     ]);
-});
+})->withoutMiddleware(EnsureFrontendRequestsAreStateful::class);
 
 // Local-development-only auto-auth shortcut — see ARCHITECTURE.md's Phase 2
 // section and DevAuthController's docblock. 404s outside app()->environment('local').

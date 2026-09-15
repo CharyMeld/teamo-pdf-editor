@@ -117,3 +117,199 @@ export function documentFileUrl(id: string): string {
 export function documentThumbnailUrl(id: string, pageNumber: number): string {
   return `${API_BASE_URL}/documents/${id}/pages/${pageNumber}/thumbnail`;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3 — ORGANIZE: real page-management operations against the backend's
+// qpdf/Ghostscript-backed engine and working-copy/undo-redo model (see
+// ARCHITECTURE.md's Phase 3 (backend) section). Every function here calls a
+// real endpoint; there is no client-side page manipulation anywhere.
+
+export interface WorkingPageMeta {
+  pageNumber: number;
+  widthPt: number;
+  heightPt: number;
+  thumbnailReady: boolean;
+}
+
+export interface WorkingPagesResponse {
+  pages: WorkingPageMeta[];
+  source: "step" | "version";
+  stepId: number | null;
+  versionId: number | null;
+  /** True while a working step's thumbnail/page-metadata job is still
+   * running — `pages` is empty until it settles; poll again shortly. */
+  pending: boolean;
+}
+
+export interface OperationResult {
+  operationId: number;
+  sequenceNumber: number;
+  pageCount: number;
+  thumbnailJobId: number;
+  status: string;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export interface UndoRedoResult {
+  pageCount: number;
+  currentStepId: number | null;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export interface SaveResult {
+  versionNumber: number;
+  document: DocumentSummary;
+}
+
+/** The subset of document fields the operation endpoints that create new
+ * documents (Save As, Extract, Split) return — narrower than
+ * DocumentSummary. Callers that need the full record call getDocument(id). */
+export interface NewDocumentRef {
+  id: string;
+  title: string;
+  status: DocumentStatus;
+  pageCount: number | null;
+}
+
+export async function getWorkingPages(id: string): Promise<WorkingPagesResponse> {
+  const { data } = await api.get<{
+    data: WorkingPageMeta[];
+    source: "step" | "version";
+    stepId?: number;
+    versionId?: number;
+    pending?: boolean;
+  }>(`/documents/${id}/working/pages`);
+  return {
+    pages: data.data,
+    source: data.source,
+    stepId: data.stepId ?? null,
+    versionId: data.versionId ?? null,
+    pending: data.pending ?? false,
+  };
+}
+
+/** URL for a real thumbnail of the *working* copy's current state — used
+ * once a document has pending edits (working/pages' `source === "step"`);
+ * falls back to documentThumbnailUrl for the unedited base version. */
+export function workingThumbnailUrl(id: string, pageNumber: number): string {
+  return `${API_BASE_URL}/documents/${id}/working/pages/${pageNumber}/thumbnail`;
+}
+
+async function postOperation(
+  id: string,
+  operation: string,
+  body: Record<string, unknown>,
+): Promise<OperationResult> {
+  const { data } = await api.post<OperationResult>(`/documents/${id}/operations/${operation}`, body);
+  return data;
+}
+
+async function postOperationMultipart(
+  id: string,
+  operation: string,
+  fields: Record<string, string | number>,
+  file: File,
+): Promise<OperationResult> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+  form.append("file", file);
+  const { data } = await api.post<OperationResult>(`/documents/${id}/operations/${operation}`, form);
+  return data;
+}
+
+export function insertBlankPage(id: string, afterPage: number): Promise<OperationResult> {
+  return postOperation(id, "insert", { afterPage, source: "blank" });
+}
+
+export function insertUploadedPage(id: string, afterPage: number, file: File): Promise<OperationResult> {
+  return postOperationMultipart(id, "insert", { afterPage, source: "upload" }, file);
+}
+
+export function deletePages(id: string, pages: number[]): Promise<OperationResult> {
+  return postOperation(id, "delete", { pages });
+}
+
+export function reorderPages(id: string, newOrder: number[]): Promise<OperationResult> {
+  return postOperation(id, "reorder", { newOrder });
+}
+
+export function duplicatePages(id: string, pages: number[]): Promise<OperationResult> {
+  return postOperation(id, "duplicate", { pages });
+}
+
+export function rotatePages(
+  id: string,
+  pages: number[],
+  degrees: 90 | 180 | 270 | -90,
+): Promise<OperationResult> {
+  return postOperation(id, "rotate", { pages, degrees });
+}
+
+export interface CropBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function cropPages(id: string, pages: number[], box: CropBox): Promise<OperationResult> {
+  return postOperation(id, "crop", { pages, box });
+}
+
+export function replacePage(
+  id: string,
+  page: number,
+  file: File,
+  replacementPage?: number,
+): Promise<OperationResult> {
+  return postOperationMultipart(
+    id,
+    "replace",
+    replacementPage ? { page, replacementPage } : { page },
+    file,
+  );
+}
+
+export function mergeDocument(
+  id: string,
+  withDocumentId: string,
+  position: "before" | "after",
+): Promise<OperationResult> {
+  return postOperation(id, "merge", { withDocumentId, position });
+}
+
+export async function extractPages(id: string, pages: number[]): Promise<NewDocumentRef> {
+  const { data } = await api.post<{ data: NewDocumentRef }>(`/documents/${id}/operations/extract`, {
+    pages,
+  });
+  return data.data;
+}
+
+export async function splitDocument(id: string, ranges: [number, number][]): Promise<NewDocumentRef[]> {
+  const { data } = await api.post<{ data: NewDocumentRef[] }>(`/documents/${id}/operations/split`, {
+    ranges,
+  });
+  return data.data;
+}
+
+export async function undoOperation(id: string): Promise<UndoRedoResult> {
+  const { data } = await api.post<UndoRedoResult>(`/documents/${id}/undo`);
+  return data;
+}
+
+export async function redoOperation(id: string): Promise<UndoRedoResult> {
+  const { data } = await api.post<UndoRedoResult>(`/documents/${id}/redo`);
+  return data;
+}
+
+export async function saveDocument(id: string): Promise<SaveResult> {
+  const { data } = await api.post<SaveResult>(`/documents/${id}/save`);
+  return data;
+}
+
+export async function saveDocumentAs(id: string, title: string): Promise<NewDocumentRef> {
+  const { data } = await api.post<{ data: NewDocumentRef }>(`/documents/${id}/save-as`, { title });
+  return data.data;
+}

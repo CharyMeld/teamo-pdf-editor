@@ -1,14 +1,47 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSelectionContext } from "../../commands/useSelectionContext";
 import { useActiveTab } from "../../hooks/useActiveTab";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
+import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
+import { useWorkingDocument } from "../../hooks/useWorkingDocument";
 import IconButton from "../ui/IconButton";
 import CommandGroup from "./CommandGroup";
 import CommandTabs from "./CommandTabs";
 import ContextualCommandGroup from "./ContextualCommandGroup";
 import MobileCommandSheet from "./MobileCommandSheet";
+
+/** Real Ctrl/Cmd+Z (undo) and Ctrl/Cmd+Shift+Z or Ctrl+Y (redo) keyboard
+ * shortcuts for Phase 3's page-operation history — skipped while focus is
+ * in a text input/textarea so it never fights native text-editing undo. */
+function useUndoRedoShortcuts() {
+  const { undo, redo, canUndo, canRedo, busy } = useWorkingDocument();
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      const meta = event.ctrlKey || event.metaKey;
+      if (!meta) return;
+
+      if (event.key.toLowerCase() === "z" && event.shiftKey) {
+        event.preventDefault();
+        if (canRedo && !busy) void redo();
+      } else if (event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (canUndo && !busy) void undo();
+      } else if (event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        if (canRedo && !busy) void redo();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [undo, redo, canUndo, canRedo, busy]);
+}
 
 /** The TeamO Command Ribbon: tabs, the active tab's command groups, and an
  * extra contextual group whenever a selection exists. Below 768px it
@@ -19,14 +52,17 @@ export default function CommandRibbon() {
   const { selection } = useSelectionContext();
   const view = useDocumentViewState();
   const { showOpenDialog } = useOpenDocument();
+  const organize = useOrganizeRunHandlers();
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const [sheetOpen, setSheetOpen] = useState(false);
+  useUndoRedoShortcuts();
 
   // Every command whose `status` is "available" gets its real handler
   // wired here, at the level that owns the relevant state — VIEW's
   // zoom/fit/navigation come from useDocumentViewState, HOME's Open comes
-  // from useOpenDocument. CommandGroup/CommandButton just look these up
-  // by id, so this map applies regardless of which tab is active.
+  // from useOpenDocument, ORGANIZE/Save/Undo/Redo come from
+  // useOrganizeRunHandlers (Phase 3). CommandGroup/CommandButton just look
+  // these up by id, so this map applies regardless of which tab is active.
   const runHandlers = {
     "view.zoomIn": view.zoomIn,
     "view.zoomOut": view.zoomOut,
@@ -35,10 +71,12 @@ export default function CommandRibbon() {
     "view.nextPage": view.goToNextPage,
     "view.prevPage": view.goToPrevPage,
     "home.open": showOpenDialog,
+    ...organize.runHandlers,
   };
   const disabledReasons: Record<string, string> = {
     ...(view.canGoNext ? {} : { "view.nextPage": "No document open" }),
     ...(view.canGoPrev ? {} : { "view.prevPage": "No document open" }),
+    ...organize.disabledReasons,
   };
 
   return (
@@ -55,7 +93,13 @@ export default function CommandRibbon() {
       {!isMobile && (
         <div className="flex items-stretch">
           <CommandGroup activeTab={activeTab} runHandlers={runHandlers} disabledReasons={disabledReasons} />
-          {selection !== "none" && <ContextualCommandGroup selection={selection} />}
+          {selection !== "none" && (
+            <ContextualCommandGroup
+              selection={selection}
+              runHandlers={runHandlers}
+              disabledReasons={disabledReasons}
+            />
+          )}
         </div>
       )}
 

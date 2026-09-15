@@ -3,6 +3,8 @@ import { getCommand } from "../../commands/registry";
 import { useCommandSearch } from "../../commands/useCommandSearch";
 import { useActiveTab } from "../../hooks/useActiveTab";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
+import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
+import { useWorkingDocument } from "../../hooks/useWorkingDocument";
 import { formatBytes } from "../../lib/format";
 import { presentDocumentStatus } from "../../lib/documentStatus";
 import DropdownMenu from "../ui/DropdownMenu";
@@ -152,13 +154,44 @@ function DocumentInfo() {
   );
 }
 
+/** Undo/Redo as persistent header buttons — real page-management history
+ * (Phase 3) is a workspace-wide concept, not something that should only be
+ * reachable while the EDIT tab happens to be active (the registry still
+ * defines edit.undo/edit.redo there too, for ribbon/search discoverability
+ * and consistency, but this is the always-visible path a real editor's
+ * undo/redo needs, matching the Ctrl+Z/Ctrl+Shift+Z shortcuts' own
+ * tab-independent availability). */
+function HistoryControls() {
+  const { undo, redo, canUndo, canRedo, busy } = useWorkingDocument();
+  return (
+    <div className="flex shrink-0 items-center gap-0.5 border-r border-border pr-1.5">
+      <IconButton
+        icon="undo"
+        label="Undo"
+        size="sm"
+        disabled={!canUndo || busy}
+        onClick={() => void undo()}
+      />
+      <IconButton
+        icon="redo"
+        label="Redo"
+        size="sm"
+        disabled={!canRedo || busy}
+        onClick={() => void redo()}
+      />
+    </div>
+  );
+}
+
 export default function AppHeader() {
   const { setActiveTab } = useActiveTab();
   const { showOpenDialog } = useOpenDocument();
+  const organize = useOrganizeRunHandlers();
   const settingsCommand = getCommand("home.properties");
 
   const runHandlers: Record<string, () => void> = {
     "home.open": showOpenDialog,
+    ...organize.runHandlers,
   };
 
   return (
@@ -171,6 +204,8 @@ export default function AppHeader() {
       <div className="w-56 shrink-0 sm:w-72">
         <CommandSearch runHandlers={runHandlers} />
       </div>
+
+      <HistoryControls />
 
       <div className="min-w-0 flex-1">
         <DocumentInfo />

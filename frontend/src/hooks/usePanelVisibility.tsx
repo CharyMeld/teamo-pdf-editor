@@ -5,6 +5,7 @@ interface PanelVisibilityValue {
   inspectorOpen: boolean;
   toggleThumbnail: () => void;
   toggleInspector: () => void;
+  openThumbnail: () => void;
   closeThumbnail: () => void;
   closeInspector: () => void;
 }
@@ -27,6 +28,7 @@ export function PanelVisibilityProvider({ children }: { children: ReactNode }) {
         inspectorOpen,
         toggleThumbnail: () => setThumbnailOpen((v) => !v),
         toggleInspector: () => setInspectorOpen((v) => !v),
+        openThumbnail: () => setThumbnailOpen(true),
         closeThumbnail: () => setThumbnailOpen(false),
         closeInspector: () => setInspectorOpen(false),
       }}

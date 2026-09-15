@@ -4,6 +4,12 @@ import CommandButton from "./CommandButton";
 
 interface ContextualCommandGroupProps {
   selection: Exclude<SelectionType, "none">;
+  /** Real handlers for contextual commands whose behavior depends on
+   * state owned above this component — e.g. "page" selected wires to
+   * useOrganizeRunHandlers (Phase 3). Commands with no entry here fall
+   * back to their own `command.run`, same as CommandButton's default. */
+  runHandlers?: Record<string, () => void>;
+  disabledReasons?: Record<string, string>;
 }
 
 /** The ribbon's contextual layer: an extra, visually distinct group that
@@ -11,7 +17,11 @@ interface ContextualCommandGroupProps {
  * CONTEXTUAL_COMMANDS[selection]. This is what makes "page selected → page
  * commands, text selected → text commands, ..." real rather than a static
  * mock. */
-export default function ContextualCommandGroup({ selection }: ContextualCommandGroupProps) {
+export default function ContextualCommandGroup({
+  selection,
+  runHandlers = {},
+  disabledReasons = {},
+}: ContextualCommandGroupProps) {
   const commands = CONTEXTUAL_COMMANDS[selection];
   const label = `${selection.charAt(0).toUpperCase()}${selection.slice(1)} Selected`;
 
@@ -20,7 +30,12 @@ export default function ContextualCommandGroup({ selection }: ContextualCommandG
       <div className="flex flex-col items-stretch">
         <div className="flex flex-1 items-start gap-1">
           {commands.map((command) => (
-            <CommandButton key={command.id} command={command} />
+            <CommandButton
+              key={command.id}
+              command={command}
+              onRun={runHandlers[command.id]}
+              disabledReason={disabledReasons[command.id]}
+            />
           ))}
         </div>
         <span className="mt-1 border-t border-accent/30 pt-1 text-center text-[10px] uppercase tracking-wide text-accent-subtle-text">

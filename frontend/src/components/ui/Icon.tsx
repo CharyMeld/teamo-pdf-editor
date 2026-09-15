@@ -21,7 +21,17 @@ export type IconName =
   | "user"
   | "open"
   | "save"
-  | "document";
+  | "document"
+  | "rotate"
+  | "trash"
+  | "undo"
+  | "redo"
+  | "duplicate"
+  | "crop"
+  | "insertPage"
+  | "merge"
+  | "split"
+  | "drag";
 
 interface IconProps {
   name: IconName;
@@ -51,6 +61,16 @@ const PATHS: Record<IconName, string> = {
   open: "M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z",
   save: "M5 4h11l3 3v13H5V4Zm3 0v5h8V4M8 14h8v6H8v-6Z",
   document: "M7 3h7l4 4v14H7V3Zm7 0v4h4",
+  rotate: "M4 12a8 8 0 1 1 2.5 5.8M4 12v5M4 17h5",
+  trash: "M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v6M14 11v6",
+  undo: "M8 8H4V4M4 8a8 8 0 1 1-1.5 6",
+  redo: "M16 8h4V4M20 8a8 8 0 1 0 1.5 6",
+  duplicate: "M8 8h11v11H8V8Z M5 16V5h11",
+  crop: "M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2",
+  insertPage: "M6 3h8l4 4v14H6V3Zm8 0v4h4M12 12v6M9 15h6",
+  merge: "M6 3v9a3 3 0 0 0 3 3h6M6 3H3l3-3 3 3H6ZM18 21v-9a3 3 0 0 0-3-3H9M18 21h3l-3 3-3-3h3Z",
+  split: "M12 3v6M8 5l4-2 4 2M6 12h5v9H6v-9Zm7 0h5v9h-5v-9Z",
+  drag: "M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01",
 };
 
 export default function Icon({ name, className, size = 16 }: IconProps) {

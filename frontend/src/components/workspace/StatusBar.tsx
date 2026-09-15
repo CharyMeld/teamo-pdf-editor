@@ -2,11 +2,49 @@ import { useEffect, useId, useState } from "react";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { usePanelVisibility } from "../../hooks/usePanelVisibility";
+import { useWorkingDocument } from "../../hooks/useWorkingDocument";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import { checkHealth } from "../../lib/api";
 import { presentDocumentStatus } from "../../lib/documentStatus";
 import IconButton from "../ui/IconButton";
 import StatusIndicator from "../ui/StatusIndicator";
+
+/** Real "unsaved changes" + last-operation-result feedback — driven by
+ * useWorkingDocument's canUndo/busy/notice, never decorative. This is
+ * Phase 3's "operation status" requirement: every ORGANIZE action shows a
+ * real in-progress state while it runs and a real success/error message
+ * when it settles. */
+function OrganizeStatus() {
+  const { busy, busyLabel, canUndo, notice, dismissNotice } = useWorkingDocument();
+
+  if (busy) {
+    return <StatusIndicator status="loading" label={busyLabel ?? "Working…"} />;
+  }
+
+  if (notice) {
+    return (
+      <span className="flex items-center gap-1.5">
+        <StatusIndicator status={notice.type === "success" ? "success" : "danger"} label={notice.message} />
+        {notice.action && (
+          <button
+            type="button"
+            onClick={notice.action.onClick}
+            className="rounded px-1 text-[11px] font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {notice.action.label}
+          </button>
+        )}
+        <IconButton icon="close" label="Dismiss" size="sm" onClick={dismissNotice} />
+      </span>
+    );
+  }
+
+  if (canUndo) {
+    return <StatusIndicator status="warning" label="Unsaved changes" />;
+  }
+
+  return null;
+}
 
 type ConnectionState = "checking" | "connected" | "unreachable";
 
@@ -212,6 +250,7 @@ export default function StatusBar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
+        <OrganizeStatus />
         {docStatus && <StatusIndicator status={docStatus.tone} label={docStatus.label} />}
         <BackendConnection />
       </div>

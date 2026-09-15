@@ -1,4 +1,4 @@
-import { SELECTION_TYPES } from "../../commands/types";
+import { SELECTION_TYPES, type SelectionType } from "../../commands/types";
 import { useSelectionContext } from "../../commands/useSelectionContext";
 
 const LABELS: Record<(typeof SELECTION_TYPES)[number], string> = {
@@ -9,13 +9,21 @@ const LABELS: Record<(typeof SELECTION_TYPES)[number], string> = {
   annotation: "Annotation",
 };
 
+// "page" is real as of Phase 3 — click a thumbnail in the panel on the left
+// instead. Simulated here only for the types that still have no real canvas
+// interaction to drive them (content/annotation editing arrive in later
+// phases).
+const SIMULATED_TYPES: SelectionType[] = SELECTION_TYPES.filter((t) => t !== "page");
+
 /**
- * Phase 1 verification tooling, plainly labeled as such: there is no real
- * PDF canvas yet to select page/text/image/annotation content from, so
- * this is how the contextual ribbon and Smart Inspector switching is
- * exercised for real. It calls the same useSelectionContext setter a real
- * canvas interaction will call once one exists — this is not a fake
- * feature, it's the honest stand-in for an input source Phase 2 adds.
+ * Verification tooling, plainly labeled as such: there is still no real
+ * canvas interaction for text/image/annotation content (those arrive in
+ * later phases), so this is how the contextual ribbon and Smart Inspector
+ * switching is exercised for real for those types. It calls the same
+ * useSelectionContext setter a real canvas interaction will call once one
+ * exists — this is not a fake feature, it's the honest stand-in for an
+ * input source a later phase adds. "Page" selection no longer needs this —
+ * it's driven by real thumbnail-panel clicks (see usePageSelection).
  */
 export default function DevSelectionSimulator() {
   const { selection, setSelection } = useSelectionContext();
@@ -26,7 +34,7 @@ export default function DevSelectionSimulator() {
         Dev: simulate selection
       </p>
       <div className="flex flex-wrap gap-1">
-        {SELECTION_TYPES.map((type) => (
+        {SIMULATED_TYPES.map((type) => (
           <button
             key={type}
             type="button"
