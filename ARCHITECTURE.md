@@ -274,3 +274,87 @@ frontend/
 - Cross-origin request from `http://localhost:5173` to `/api/health` with
   `Origin` header returned `Access-Control-Allow-Origin` + `Access-Control-Allow-Credentials: true` + Sanctum's `XSRF-TOKEN`/session cookies — confirming the SPA
   auth wiring is live and correct, not just configured.
+
+## Phase 1 — application shell (2026-09-15)
+
+Builds the real ribbon/workspace UI on top of Phase 0's foundation. **Still no
+PDF processing** — no document is ever opened or rendered; every command
+whose feature isn't built yet is represented as genuinely disabled, never a
+dead or fake-working button. Backend is untouched; this phase is entirely
+`frontend/src/`.
+
+- **Command registry** (`commands/`): `types.ts` defines `Command` /
+  `TabId` / `SelectionType`; `registry.ts` holds every command across all 12
+  tabs (`status: "unavailable"` for anything not yet built; only VIEW's
+  zoom/fit/page-nav are `"available"`, since those are real Phase 1 UI
+  state) plus `CONTEXTUAL_COMMANDS` keyed by selection type;
+  `useCommandSearch.ts` does real substring search over label/description/
+  keywords; `useSelectionContext.tsx` is the selection-type context the
+  contextual ribbon and inspector both read.
+- **Design system**: `design-system/theme.css` — an original teal-accent/
+  graphite-neutral token set (Tailwind v4 `@theme`, not Office blue or
+  Acrobat red) — plus reusable primitives in `components/ui/` (`Button`,
+  `IconButton`, `Tooltip`, `DropdownMenu`, `Panel`, `Badge`, `Spinner`,
+  `EmptyState`, `StatusIndicator`, `Icon`). Every ribbon/header/inspector
+  control is built from these, not one-off styled elements.
+- **`CommandButton`** (`components/ribbon/`): the single component every
+  command renders through — available commands are real buttons; anything
+  `status: "unavailable"` renders visibly locked/badged, `aria-disabled`,
+  non-clickable, with a tooltip that says so. This is what guarantees no
+  dead or fake buttons anywhere in the ribbon, header search, or canvas.
+- **Ribbon**: `CommandTabs` is a real `role="tablist"` with roving-tabindex
+  keyboard navigation; `CommandGroup` renders the active tab's commands
+  from the registry with a "More" overflow dropdown past a viewport-based
+  cap; `ContextualCommandGroup` appends an accent-bordered group sourced
+  from `CONTEXTUAL_COMMANDS` whenever a selection exists;
+  `MobileCommandSheet` replaces the wide ribbon with a compact action sheet
+  under 768px. `organize.rotate` demonstrates the dropdown-command pattern.
+- **Workspace**: `ThumbnailPanel` and `SmartInspector` are docked panes on
+  desktop and off-canvas drawers on tablet/mobile (`hooks/usePanelVisibility.tsx`,
+  toggled from `StatusBar`); `SmartInspector` switches between
+  `panels/{Document,Page,Selection,Properties}Panel.tsx` based on real
+  selection state; `PdfCanvas` keeps an honest empty state plus the
+  `.canvas-viewport` container Phase 2's pdf.js rendering mounts into.
+- **`DevSelectionSimulator`**: a plainly-labeled dev-only control (renders
+  inside the Smart Inspector) that drives `useSelectionContext` so the
+  contextual ribbon/inspector switching can be exercised without a real PDF
+  canvas — the mechanism it exercises is real; only the input source is a
+  stand-in until Phase 2's canvas provides real selection events.
+- **Status bar**: real page position/prev-next (genuinely disabled at
+  `totalPages === 0`), zoom in/out + percent (25–400%, clamped), Fit
+  Page/Fit Width toggle, a document-search input (disabled until a document
+  exists), and the existing backend health indicator — all from
+  `hooks/useDocumentViewState.tsx`.
+- **Accessibility**: roving-tabindex tablist, `role="menu"`/`"menuitem"`
+  keyboard-navigable dropdowns with focus return on close, a global
+  `:focus-visible` ring token, every icon-only control labeled via
+  `IconButton`'s mandatory `label` prop (doubles as its tooltip).
+- **Responsive**: real breakpoint-driven behavior via
+  `hooks/useMediaQuery.ts` (matchMedia-backed, not CSS-only) — desktop
+  (≥1024px) full ribbon + docked panels; tablet (768–1023px) toggleable
+  panel drawers + tighter overflow cap; mobile (<768px) compact tab strip +
+  action-sheet command system replacing the ribbon outright, drawer-only
+  panels.
+
+### Verified working (2026-09-15)
+
+- `tsc -b && vite build`: zero TypeScript errors, zero build errors.
+- `oxlint`: zero errors (five informational warnings — Fast Refresh
+  "only-export-components" on three context+hook files, one ref-in-render
+  false positive in `Tooltip.tsx` where the ref is only read inside event
+  handlers, not during render).
+- Real interaction testing against the live `php artisan serve` +
+  `npm run dev` servers via the Chrome DevTools Protocol (no document
+  automation library installed in this environment, so a small CDP script
+  was used instead of Playwright/Puppeteer): all 12 tabs switch and update
+  `role="tabpanel"`; searching "compress" and "ocr" returns the correct
+  commands; cycling the selection simulator through
+  none/page/text/image/annotation correctly toggles the contextual ribbon
+  group and switches the Smart Inspector's panel heading
+  (Document → Page → Text/Image/Annotation Selection); zoom-in ×2 moved
+  100% → 150%, Fit Width toggled `aria-pressed`; previous/next page are
+  genuinely disabled; the tablet panel-toggle button opens its drawer; the
+  mobile Commands button opens the action sheet and the desktop ribbon
+  panel is not rendered at that width. Zero console errors across the
+  session. Screenshots at 1440×900 / 820×1180 / 390×844 additionally
+  confirm the visual layout at each breakpoint.
