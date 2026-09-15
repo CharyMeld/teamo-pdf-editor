@@ -1,4 +1,5 @@
 import type { Command } from "../../commands/types";
+import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import Badge from "../ui/Badge";
 import DropdownMenu from "../ui/DropdownMenu";
 import Icon, { type IconName } from "../ui/Icon";
@@ -37,6 +38,12 @@ export default function CommandButton({
   const isAvailable = command.status === "available" && !disabledReason;
   const isUnimplemented = command.status !== "available";
   const handleRun = onRun ?? command.run;
+  // Desktop (≥1024px) gets a genuinely larger command card — bigger icon,
+  // bigger label, more breathing room — matching professional desktop
+  // productivity software. Tablet keeps the original compact card exactly
+  // as tested; only the numeric icon `size` needs a JS-level check since it
+  // can't be expressed as a Tailwind class.
+  const isDesktop = !useMediaQuery(BREAKPOINTS.tablet);
 
   const content = compact ? (
     <span className="flex items-center gap-2">
@@ -45,20 +52,30 @@ export default function CommandButton({
       {isUnimplemented && <Badge>Planned</Badge>}
     </span>
   ) : (
-    <span className="flex w-16 flex-col items-center gap-1 text-center">
-      <span className="flex h-5 items-center justify-center">
+    <span
+      className={
+        isDesktop
+          ? "flex w-24 flex-col items-center gap-1.5 text-center"
+          : "flex w-16 flex-col items-center gap-1 text-center"
+      }
+    >
+      <span className={isDesktop ? "flex h-7 items-center justify-center" : "flex h-5 items-center justify-center"}>
         {command.icon ? (
-          <Icon name={command.icon as IconName} size={18} />
+          <Icon name={command.icon as IconName} size={isDesktop ? 24 : 18} />
         ) : (
-          <span className="text-sm font-semibold">{command.label.charAt(0)}</span>
+          <span className={isDesktop ? "text-lg font-semibold" : "text-sm font-semibold"}>
+            {command.label.charAt(0)}
+          </span>
         )}
         {isUnimplemented && (
-          <span className="-mt-3 ml-4 text-text-subtle">
-            <Icon name="lock" size={10} />
+          <span className={isDesktop ? "-mt-4 ml-5 text-text-subtle" : "-mt-3 ml-4 text-text-subtle"}>
+            <Icon name="lock" size={isDesktop ? 12 : 10} />
           </span>
         )}
       </span>
-      <span className="text-[11px] leading-tight">{command.label}</span>
+      <span className={isDesktop ? "text-[13px] font-medium leading-tight" : "text-[11px] leading-tight"}>
+        {command.label}
+      </span>
     </span>
   );
 
@@ -70,7 +87,7 @@ export default function CommandButton({
       onClick={isAvailable ? handleRun : undefined}
       className={[
         "rounded-md transition-colors",
-        compact ? "w-full px-2 py-1.5 text-left text-xs" : "px-2 py-1.5",
+        compact ? "w-full px-2 py-1.5 text-left text-xs" : isDesktop ? "px-3 py-2.5" : "px-2 py-1.5",
         isAvailable
           ? "text-text hover:bg-surface-muted"
           : "cursor-not-allowed text-text-subtle opacity-60",

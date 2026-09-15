@@ -51,7 +51,7 @@ export default function CommandTabs({ activeTab, onSelect }: CommandTabsProps) {
     <div
       role="tablist"
       aria-label="Command tabs"
-      className="flex h-9 items-stretch overflow-x-auto border-b border-border bg-surface-muted px-2"
+      className="flex h-9 items-stretch overflow-x-auto border-b border-border bg-surface-muted px-2 lg:h-[52px] lg:gap-1 lg:px-4"
     >
       {TAB_IDS.map((tab, index) => {
         const isActive = tab === activeTab;
@@ -71,9 +71,10 @@ export default function CommandTabs({ activeTab, onSelect }: CommandTabsProps) {
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={
               "shrink-0 whitespace-nowrap px-3 text-xs font-medium tracking-wide transition-colors " +
+              "lg:px-5 lg:text-[15px] lg:font-semibold lg:tracking-normal " +
               (isActive
-                ? "border-b-2 border-accent text-text"
-                : "border-b-2 border-transparent text-text-muted hover:text-text")
+                ? "border-b-2 border-accent text-text lg:border-b-[3px]"
+                : "border-b-2 border-transparent text-text-muted hover:text-text lg:border-b-[3px]")
             }
           >
             {tab}

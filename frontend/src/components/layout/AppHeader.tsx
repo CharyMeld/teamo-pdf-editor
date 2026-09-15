@@ -187,7 +187,7 @@ export default function AppHeader() {
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
       <div className="flex shrink-0 items-center gap-2">
-        <img src={teamoLogo} alt="TeamO Digital" className="h-6 w-auto" />
+        <img src={teamoLogo} alt="TeamO Digital" className="h-11 w-auto" />
         <span className="h-4 w-px bg-border" aria-hidden="true" />
         <span className="text-sm font-semibold tracking-tight text-text">PDF Editor</span>
       </div>

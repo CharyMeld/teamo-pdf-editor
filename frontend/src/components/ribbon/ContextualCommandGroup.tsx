@@ -26,9 +26,9 @@ export default function ContextualCommandGroup({
   const label = `${selection.charAt(0).toUpperCase()}${selection.slice(1)} Selected`;
 
   return (
-    <div className="flex h-16 shrink-0 items-stretch gap-1 border-l-2 border-accent bg-accent-subtle/40 px-3 py-1.5">
+    <div className="flex h-16 shrink-0 items-stretch gap-1 border-l-2 border-accent bg-accent-subtle/40 px-3 py-1.5 lg:h-auto lg:min-h-[112px] lg:px-5 lg:py-4">
       <div className="flex flex-col items-stretch">
-        <div className="flex flex-1 items-start gap-1">
+        <div className="flex flex-1 items-start gap-1 lg:gap-2">
           {commands.map((command) => (
             <CommandButton
               key={command.id}
@@ -38,7 +38,7 @@ export default function ContextualCommandGroup({
             />
           ))}
         </div>
-        <span className="mt-1 border-t border-accent/30 pt-1 text-center text-[10px] uppercase tracking-wide text-accent-subtle-text">
+        <span className="mt-1 border-t border-accent/30 pt-1 text-center text-[10px] uppercase tracking-wide text-accent-subtle-text lg:mt-1.5 lg:pt-1.5 lg:text-xs">
           {label}
         </span>
       </div>

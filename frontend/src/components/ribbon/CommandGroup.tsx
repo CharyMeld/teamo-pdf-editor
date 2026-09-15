@@ -43,7 +43,7 @@ export default function CommandGroup({
 
   if (groups.size === 0) {
     return (
-      <div className="flex h-16 items-center px-4 text-xs text-text-subtle">
+      <div className="flex h-16 items-center px-4 text-xs text-text-subtle lg:min-h-[112px] lg:h-auto lg:px-5 lg:text-sm">
         No commands defined for {activeTab} yet.
       </div>
     );
@@ -54,14 +54,14 @@ export default function CommandGroup({
       role="tabpanel"
       id={`tabpanel-${activeTab}`}
       aria-labelledby={`tab-${activeTab}`}
-      className="flex h-16 items-stretch gap-4 overflow-x-auto px-3 py-1.5"
+      className="flex h-16 items-stretch gap-4 overflow-x-auto px-3 py-1.5 lg:h-auto lg:min-h-[112px] lg:gap-8 lg:px-5 lg:py-4"
     >
       {Array.from(groups.entries()).map(([groupName, commands]) => {
         const visible = commands.slice(0, visibleCap);
         const overflow = commands.slice(visibleCap);
         return (
           <div key={groupName} className="flex shrink-0 flex-col items-stretch">
-            <div className="flex flex-1 items-start gap-1">
+            <div className="flex flex-1 items-start gap-1 lg:gap-2">
               {visible.map((command) => (
                 <CommandButton
                   key={command.id}
@@ -85,7 +85,7 @@ export default function CommandGroup({
                 />
               )}
             </div>
-            <span className="mt-1 border-t border-border pt-1 text-center text-[10px] uppercase tracking-wide text-text-subtle">
+            <span className="mt-1 border-t border-border pt-1 text-center text-[10px] uppercase tracking-wide text-text-subtle lg:mt-1.5 lg:pt-1.5 lg:text-xs">
               {groupName}
             </span>
           </div>
