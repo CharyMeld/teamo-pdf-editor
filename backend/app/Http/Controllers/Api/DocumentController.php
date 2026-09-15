@@ -95,7 +95,7 @@ class DocumentController extends Controller
             'status' => $isEncrypted ? 'password_protected' : 'processing',
         ]);
 
-        DocumentVersion::create([
+        $version = DocumentVersion::create([
             'document_id' => $document->id,
             'version_number' => 1,
             'storage_disk' => 'documents',
@@ -116,7 +116,7 @@ class DocumentController extends Controller
                 'status' => 'queued',
                 'created_by' => $request->user()->id,
             ]);
-            GenerateDocumentThumbnails::dispatch($document->id, $job->id);
+            GenerateDocumentThumbnails::dispatch($document->id, $version->id, $job->id);
         }
 
         return response()->json($this->serializeDocument($document->fresh()), 201);

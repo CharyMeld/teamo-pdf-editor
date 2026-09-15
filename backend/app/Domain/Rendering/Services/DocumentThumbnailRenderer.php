@@ -33,60 +33,43 @@ use Throwable;
  * exactly what the frontend needs to lay out that page correctly.
  * `rotation_degrees` on `document_pages` is reserved for a future *user*
  * rotation edit (Organize phase) and is always 0 here.
+ *
+ * Phase 3 (Organize) reuses the same per-page rasterization core via
+ * `renderWorkingStep()` for the "working copy" edit pipeline, where page
+ * metadata is *not* persisted as `document_pages` rows (those belong only
+ * to saved `document_versions` — see ARCHITECTURE.md's document state
+ * model) but returned as a plain array stored in
+ * `document_edit_operations.pages_snapshot` instead.
  */
 class DocumentThumbnailRenderer
 {
     public function render(Document $document, DocumentVersion $version, ?string $password, ?DocumentJob $job): void
     {
-        $dpi = (int) config('documents.thumbnail_dpi', 110);
         $originalAbsolutePath = Storage::disk($version->storage_disk)->path($version->storage_path);
 
-        $job?->update(['status' => 'processing', 'started_at' => now()]);
         $document->update(['status' => 'processing']);
 
-        $pageCount = $this->readPageCount($originalAbsolutePath, $password);
-
-        $tempRoot = 'thumbnails/'.$document->uuid.'/'.Str::random(8);
-        Storage::disk('temp')->makeDirectory($tempRoot);
-
-        DocumentPage::where('document_version_id', $version->id)->delete();
-
-        $succeeded = 0;
-        $failedPages = [];
-
-        try {
-            for ($page = 1; $page <= $pageCount; $page++) {
-                try {
-                    [$widthPt, $heightPt, $thumbnailPath] = $this->renderPage(
-                        $originalAbsolutePath,
-                        $password,
-                        $dpi,
-                        $tempRoot,
-                        $document->uuid,
-                        $version->version_number,
-                        $page,
-                    );
-
-                    DocumentPage::create([
-                        'document_version_id' => $version->id,
-                        'page_number' => $page,
+        $storagePrefix = "{$document->uuid}/versions/{$version->version_number}/thumbnails";
+        [$pageCount, $succeeded, $failedPages] = $this->renderPagesLoop(
+            $originalAbsolutePath,
+            $password,
+            $document->uuid,
+            $storagePrefix,
+            $job,
+            function (int $page, float $widthPt, float $heightPt, string $thumbnailPath) use ($version) {
+                DocumentPage::updateOrCreate(
+                    ['document_version_id' => $version->id, 'page_number' => $page],
+                    [
                         'width_pt' => $widthPt,
                         'height_pt' => $heightPt,
                         'rotation_degrees' => 0,
                         'thumbnail_path' => $thumbnailPath,
                         'created_at' => now(),
-                    ]);
-
-                    $succeeded++;
-                } catch (Throwable) {
-                    $failedPages[] = $page;
-                }
-
-                $job?->update(['progress_percent' => (int) floor($page / $pageCount * 100)]);
-            }
-        } finally {
-            Storage::disk('temp')->deleteDirectory($tempRoot);
-        }
+                    ],
+                );
+            },
+            fn () => DocumentPage::where('document_version_id', $version->id)->delete(),
+        );
 
         if ($succeeded === 0) {
             throw new RuntimeException('No pages could be rendered.');
@@ -103,6 +86,99 @@ class DocumentThumbnailRenderer
             'completed_at' => now(),
             'error_message' => $failedPages === [] ? null : ('Pages failed to render: '.implode(',', $failedPages)),
         ]);
+    }
+
+    /**
+     * Phase 3: render a working-copy step's pages without touching
+     * `documents.status`/`page_count` or any `document_pages` row — the
+     * document's *saved* status/page_count only change on Save. Returns
+     * the page metadata array the caller persists into
+     * `document_edit_operations.pages_snapshot`.
+     *
+     * @return array{pageCount: int, pages: list<array{pageNumber: int, widthPt: float, heightPt: float, thumbnailPath: string}>, failedPages: list<int>}
+     */
+    public function renderWorkingStep(string $sourceAbsolutePath, string $documentUuid, string $storagePrefix, ?DocumentJob $job): array
+    {
+        $pages = [];
+
+        [$pageCount, $succeeded, $failedPages] = $this->renderPagesLoop(
+            $sourceAbsolutePath,
+            null,
+            $documentUuid,
+            $storagePrefix,
+            $job,
+            function (int $page, float $widthPt, float $heightPt, string $thumbnailPath) use (&$pages) {
+                $pages[] = [
+                    'pageNumber' => $page,
+                    'widthPt' => $widthPt,
+                    'heightPt' => $heightPt,
+                    'thumbnailPath' => $thumbnailPath,
+                ];
+            },
+        );
+
+        if ($succeeded === 0) {
+            throw new RuntimeException('No pages could be rendered.');
+        }
+
+        return ['pageCount' => $pageCount, 'pages' => $pages, 'failedPages' => $failedPages];
+    }
+
+    /**
+     * @param  callable(int, float, float, string): void  $onPageRendered
+     * @param  (callable(): void)|null  $beforeStart  e.g. clearing stale document_pages rows
+     * @return array{0: int, 1: int, 2: list<int>} [pageCount, succeededCount, failedPages]
+     */
+    private function renderPagesLoop(
+        string $sourceAbsolutePath,
+        ?string $password,
+        string $documentUuid,
+        string $storagePrefix,
+        ?DocumentJob $job,
+        callable $onPageRendered,
+        ?callable $beforeStart = null,
+    ): array {
+        $dpi = (int) config('documents.thumbnail_dpi', 110);
+
+        $job?->update(['status' => 'processing', 'started_at' => now()]);
+
+        $pageCount = $this->readPageCount($sourceAbsolutePath, $password);
+
+        $tempRoot = 'thumbnails/'.$documentUuid.'/'.Str::random(8);
+        Storage::disk('temp')->makeDirectory($tempRoot);
+
+        if ($beforeStart !== null) {
+            $beforeStart();
+        }
+
+        $succeeded = 0;
+        $failedPages = [];
+
+        try {
+            for ($page = 1; $page <= $pageCount; $page++) {
+                try {
+                    [$widthPt, $heightPt, $thumbnailPath] = $this->renderPage(
+                        $sourceAbsolutePath,
+                        $password,
+                        $dpi,
+                        $tempRoot,
+                        $storagePrefix,
+                        $page,
+                    );
+
+                    $onPageRendered($page, $widthPt, $heightPt, $thumbnailPath);
+                    $succeeded++;
+                } catch (Throwable) {
+                    $failedPages[] = $page;
+                }
+
+                $job?->update(['progress_percent' => (int) floor($page / $pageCount * 100)]);
+            }
+        } finally {
+            Storage::disk('temp')->deleteDirectory($tempRoot);
+        }
+
+        return [$pageCount, $succeeded, $failedPages];
     }
 
     private function readPageCount(string $absolutePath, ?string $password): int
@@ -137,8 +213,7 @@ class DocumentThumbnailRenderer
         ?string $password,
         int $dpi,
         string $tempRoot,
-        string $documentUuid,
-        int $versionNumber,
+        string $storagePrefix,
         int $page,
     ): array {
         $pageTempDir = $tempRoot.'/page-'.$page;
@@ -173,7 +248,7 @@ class DocumentThumbnailRenderer
         $widthPt = round($widthPx / $dpi * 72, 2);
         $heightPt = round($heightPx / $dpi * 72, 2);
 
-        $storagePath = "{$documentUuid}/versions/{$versionNumber}/thumbnails/{$page}.png";
+        $storagePath = "{$storagePrefix}/{$page}.png";
         Storage::disk('documents')->put($storagePath, file_get_contents($pngAbsolutePath));
 
         Storage::disk('temp')->deleteDirectory($pageTempDir);

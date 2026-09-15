@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\DocumentEditController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -30,4 +31,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/{document}/file', [DocumentController::class, 'file']);
     Route::get('/documents/{document}/pages/{pageNumber}/thumbnail', [DocumentController::class, 'thumbnail']);
     Route::post('/documents/{document}/unlock', [DocumentController::class, 'unlock']);
+
+    // Phase 3 (ORGANIZE): real page-management operations against the
+    // document's working copy — see WorkingCopyManager's docblock and
+    // ARCHITECTURE.md's Phase 3 section.
+    Route::get('/documents/{document}/working/pages', [DocumentEditController::class, 'workingPages']);
+    Route::get('/documents/{document}/working/pages/{pageNumber}/thumbnail', [DocumentEditController::class, 'workingThumbnail']);
+    Route::post('/documents/{document}/operations/insert', [DocumentEditController::class, 'insert']);
+    Route::post('/documents/{document}/operations/delete', [DocumentEditController::class, 'delete']);
+    Route::post('/documents/{document}/operations/reorder', [DocumentEditController::class, 'reorder']);
+    Route::post('/documents/{document}/operations/duplicate', [DocumentEditController::class, 'duplicate']);
+    Route::post('/documents/{document}/operations/rotate', [DocumentEditController::class, 'rotate']);
+    Route::post('/documents/{document}/operations/extract', [DocumentEditController::class, 'extract']);
+    Route::post('/documents/{document}/operations/split', [DocumentEditController::class, 'split']);
+    Route::post('/documents/{document}/operations/merge', [DocumentEditController::class, 'merge']);
+    Route::post('/documents/{document}/operations/replace', [DocumentEditController::class, 'replace']);
+    Route::post('/documents/{document}/operations/crop', [DocumentEditController::class, 'crop']);
+    Route::post('/documents/{document}/undo', [DocumentEditController::class, 'undo']);
+    Route::post('/documents/{document}/redo', [DocumentEditController::class, 'redo']);
+    Route::post('/documents/{document}/save', [DocumentEditController::class, 'save']);
+    Route::post('/documents/{document}/save-as', [DocumentEditController::class, 'saveAs']);
 });

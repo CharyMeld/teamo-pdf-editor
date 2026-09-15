@@ -22,6 +22,8 @@ class Document extends Model
         'size_bytes',
         'status',
         'page_count',
+        'current_step_id',
+        'base_version_id',
     ];
 
     protected function casts(): array
@@ -56,6 +58,27 @@ class Document extends Model
     public function jobs(): HasMany
     {
         return $this->hasMany(DocumentJob::class);
+    }
+
+    public function editOperations(): HasMany
+    {
+        return $this->hasMany(DocumentEditOperation::class)->orderBy('sequence_number');
+    }
+
+    public function currentStep(): BelongsTo
+    {
+        return $this->belongsTo(DocumentEditOperation::class, 'current_step_id');
+    }
+
+    public function baseVersion(): BelongsTo
+    {
+        return $this->belongsTo(DocumentVersion::class, 'base_version_id');
+    }
+
+    /** True while the working copy has unsaved edits applied on top of its base version. */
+    public function hasPendingEdits(): bool
+    {
+        return $this->current_step_id !== null;
     }
 
     public function auditLogs(): HasMany

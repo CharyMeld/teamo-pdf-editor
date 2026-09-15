@@ -574,3 +574,239 @@ enough, no new dependency added):
   matched the source file's checksum exactly, checked both immediately after
   upload and again after the thumbnail job completed.
 - Zero browser console errors across every scenario above.
+
+## Phase 3 (backend) — real PDF page-management engine (2026-09-15)
+
+ORGANIZE's ten page operations are now real, against a real "working copy" —
+the state the document state model named at Phase 0 and deliberately left
+unimplemented until an editing module had actual logic. **Backend only** —
+no frontend work in this phase; the ribbon's ORGANIZE commands stay
+`"unavailable"` in the registry until the frontend half wires them up.
+
+### Engine choice
+
+- **`qpdf`** (newly installed this phase — was intentionally absent through
+  Phase 0–2, see the engine table) is the primary tool, via its `--pages`
+  composition primitive: `qpdf --empty --pages FILE1 RANGE1 FILE2 RANGE2 -- OUT`
+  builds an output from arbitrary page ranges of one or more source files, in
+  any order, with repeats allowed. One primitive covers delete (omit a page),
+  reorder (list pages out of order), duplicate (list a page twice), extract
+  (list only wanted pages), split (call it once per range), merge (pull pages
+  from a second file), insert (splice another file's pages into a range list),
+  and replace (omit the old page, splice in a replacement). Rotation combines
+  into the same invocation via `--rotate=+90:pageNumber` (relative to the
+  page's *existing* rotation — confirmed empirically that `/Rotate` carries
+  forward file-to-file, so no separate rotation bookkeeping is needed; each
+  step's output becomes the next step's input).
+- **Ghostscript (`gs`)**, already on the host, handles the one thing qpdf's
+  CLI has no primitive for: crop. A page is first extracted alone (via qpdf),
+  then Ghostscript rewrites its MediaBox with
+  `-dUseCropBox -dDEVICEWIDTHPOINTS=<w> -dDEVICEHEIGHTPOINTS=<h> -dFIXEDMEDIA`
+  plus a `PageOffset` PostScript directive, producing an exact-size cropped
+  single page that's spliced back in via qpdf. Verified empirically (a
+  200×300pt crop request produced exactly a 200×300pt output page, confirmed
+  via both `pdfinfo -box` and rendering to a 200×300px image at 72 DPI) before
+  being wired into the real endpoint.
+- Every invocation runs through Laravel's `Process` facade with an argument
+  array — never a shell string — so page numbers/paths can't be interpreted
+  as shell syntax. qpdf's exit code **3** ("succeeded with warnings" — e.g.
+  minor cross-reference quirks in the *source* file) is treated as success,
+  not failure; only exit code 2 or an unstartable process is a real error —
+  confirmed necessary against several of the real test PDFs, which qpdf
+  processed correctly while still emitting warnings.
+
+### Working-copy / undo-redo model
+
+New table `document_edit_operations` (`App\Models\DocumentEditOperation`,
+owned by the Editing module): one row per applied operation, holding the
+*real PDF snapshot* it produced (`resulting_storage_path`) plus its type,
+JSON payload, and resulting page count. `documents` gained two pointer
+columns: `current_step_id` (null = no pending edits — the working state IS
+the base version) and `base_version_id` (which saved version an editing
+session started from).
+
+- **Undo/redo is just moving the pointer** through the operation chain — no
+  separate "undo log", the chain itself *is* the undo history, and each step
+  is a real, independently-inspectable PDF file (verified throughout testing
+  by running `pdfinfo`/`pdftotext`/`qpdf --show-npages` directly against each
+  step's file, never by trusting the API's JSON response).
+- **Redo-branch pruning**: applying a new operation while the pointer isn't
+  at the tip deletes both the DB rows *and* the on-disk files for every step
+  ahead of it first — exactly a text editor's undo-stack semantics. Verified:
+  3 operations → undo ×2 → redo ×1 → a new 4th operation correctly discarded
+  the original 3rd step (file and row both gone) and made redo unavailable
+  again.
+- **Thumbnails for a working step are always a queued job**
+  (`App\Jobs\GenerateWorkingThumbnails`, reusing
+  `DocumentThumbnailRenderer`'s per-page rasterization core via a new
+  `renderWorkingStep()` method — refactored out of the Phase 2 `render()`
+  method rather than duplicated), never inline. Timing measured directly
+  against the 261-page test file: the qpdf/Ghostscript step itself completes
+  in **under 1.1 seconds** even at that scale, but thumbnail rasterization
+  runs at roughly 0.4–0.8s/page — for 261 pages that's minutes, which would
+  time out an HTTP request. A working step's page geometry/thumbnails are
+  stored as a JSON array on `document_edit_operations.pages_snapshot`, *not*
+  as `document_pages` rows — `document_pages` stays scoped to *saved*
+  versions only (see the Pages module's updated `MODULE.md`), keeping the
+  two states unambiguous.
+- `GenerateDocumentThumbnails` (Phase 2) previously hardcoded
+  `version_number = 1` — harmless when only one version could ever exist,
+  but wrong now that Save creates real new versions. Fixed to take an
+  explicit `versionId`; the one existing call site (upload) updated
+  accordingly. Caught by design review before it could cause a real bug in
+  Save's regenerated thumbnails.
+
+### Save / Save As
+
+- **Save** (`POST /documents/{id}/save`) copies the current working file into
+  a new `document_versions` row (`versions/{n}/document.pdf`), flips
+  `is_current`, resets the working-copy pointer to null, and dispatches the
+  normal Phase 2 thumbnail job against the new version. Verified: the new
+  version's `checksum_sha256` matched a fresh `sha256sum` of the working
+  file exactly, and — the critical guarantee — version 1's file was still
+  byte-identical to the original source PDF after 9 real edits and a save
+  (**"keep the original file untouched"**, actually checked, not assumed).
+- **Save As** (`POST /documents/{id}/save-as`) wraps the current working
+  state as version 1 of a brand-new, independent `Document` (shares a
+  `createDocumentFromFile()` helper with Extract/Split — see below).
+  Verified the source document's own pending edit (an uncommitted rotate)
+  was completely unaffected by a Save As of its current state — confirmed
+  by checking `current_step_id` was unchanged before/after.
+- **Deliberate behavior, not a bug**: Save prunes the *entire* pre-save
+  operation chain (its content is now durably captured in the new version,
+  so the old step files are redundant) — meaning undo does not reach back
+  across a Save. This falls directly out of the "pointer at 0 after Save ⇒
+  everything ahead of 0 is pruned" rule already needed for redo-branch
+  cutting; it was not special-cased, and is consistent with the documented
+  state model (the working copy *becomes* the new version on Save, it
+  doesn't coexist with it).
+- Both endpoints correctly reject a no-op case with a clear error rather
+  than a silent success: Save with no pending edits →
+  *"There are no pending changes to save."*; Undo/Redo with nothing to
+  undo/redo → equivalent clear errors. All three verified against the live
+  API, not inferred.
+
+### The ten operations (all real, all endpoint-tested against live output)
+
+| Operation | Endpoint | Mutates working copy? |
+|---|---|---|
+| Insert | `POST .../operations/insert` (blank page or an uploaded PDF's pages) | Yes |
+| Delete | `POST .../operations/delete` | Yes |
+| Reorder | `POST .../operations/reorder` (full permutation) | Yes |
+| Duplicate | `POST .../operations/duplicate` | Yes |
+| Rotate | `POST .../operations/rotate` (±90/180/270) | Yes |
+| Crop | `POST .../operations/crop` (bottom-left-origin PDF-point box) | Yes |
+| Replace | `POST .../operations/replace` (a page from an uploaded PDF) | Yes |
+| Merge | `POST .../operations/merge` (another owned, ready document, before/after) | Yes |
+| Extract | `POST .../operations/extract` | **No** — produces a new sibling `Document` |
+| Split | `POST .../operations/split` (multiple `[start,end]` ranges) | **No** — produces multiple new `Document`s |
+
+Every mutating operation validates page references against the document's
+**real current page count** (from the working-copy pointer, not a cached
+value) before touching qpdf/Ghostscript, and returns
+`{operationId, sequenceNumber, pageCount, thumbnailJobId, status, canUndo,
+canRedo}`. `GET .../working/pages` and
+`GET .../working/pages/{n}/thumbnail` expose the current working state
+(falling back to the base version's real `document_pages` when there are no
+pending edits yet).
+
+Each operation was verified against its **real output file**, not the API's
+own claims — representative examples actually run during this phase:
+
+- **Delete** page 5 of 8 → confirmed 7 pages, and (via `pdftotext` per-page
+  fingerprints) that the old page 6's content is now at position 5 and the
+  old page 5's text no longer appears anywhere in the document.
+- **Reorder** `[7,6,5,4,3,2,1]` → confirmed each output page's real text
+  matches the expected original page, fully reversed.
+- **Rotate** +90° → confirmed via rendering to an image that width/height
+  swapped exactly as a real 90° rotation requires (414×585 → 585×414).
+- **Duplicate** page 2 → confirmed pages 2 and 3 have byte-for-byte identical
+  extracted text.
+- **Crop** a 200×300pt box at offset (50,50) → confirmed the resulting page's
+  real `pdfinfo` size is exactly 200×300pt, other pages untouched.
+- **Merge** a second (1-page) document *after* → confirmed page count +1 and
+  the new last page's real text matches the merged-in document exactly.
+- **Insert** a blank page at the start → confirmed page 1 has no extractable
+  text and the correct real dimensions, and every later page shifted down by
+  one with its content intact.
+- **Insert from upload** at position 3 → confirmed the inserted page's real
+  content matches the uploaded source and surrounding pages shifted
+  correctly.
+- **Replace** page 5 with an uploaded page → confirmed the old page 5's
+  fingerprint text is gone and the new content is in its place; pages 4 and 6
+  unaffected.
+- **Extract** pages `[1,3]` → confirmed the new document's page 1 and 2 real
+  content matches source pages 1 and 3 respectively, in that order.
+- **Split** into `[1,4]` and `[5,9]` → confirmed two new independent
+  documents with 4 and 5 real pages respectively (summing to the source's 9),
+  and the source document's own working pointer was unaffected by either.
+- **At 261-page scale**: delete page 150 → confirmed exactly 260 pages and
+  that the real text of the old page 151 is now at position 150
+  (character-for-character match); the qpdf step completed in ~1 second.
+
+### Error handling (all verified against the live API, real rejections)
+
+- Out-of-range page numbers, an invalid reorder permutation (not a true
+  1..N permutation), a rotation not in `{90, 180, 270, -90}`, a crop box
+  exceeding the page bounds, and an operation that would delete every
+  remaining page all return a clear `422` with a specific message — and,
+  confirmed via direct DB inspection, **create no orphan
+  `document_edit_operations` row and no stray file** on rejection.
+- Editing is refused with *"This document is not ready for editing yet."*
+  whenever `documents.status !== 'ready'` — including the real window right
+  after upload, before the initial thumbnail job completes, when
+  `page_count`/`document_pages` aren't trustworthy yet. The same rule gates
+  Merge's *other* document (must itself be `'ready'`, not merely
+  `'processing'`), confirmed by attempting a merge immediately after
+  uploading the other file.
+- Merge/ownership boundaries are real, not cosmetic: merging against a
+  document owned by a different (test-seeded) user, and against a
+  nonexistent document UUID, both correctly return
+  *"...not found, not owned by you, or not ready."*; directly fetching
+  another user's document returns a real `403`.
+- Insert/Replace source files go through the same real validation as a
+  top-level upload (content-sniffed MIME via `finfo`, then a `pdfinfo`
+  structural check) — verified by disguising a PNG as `.pdf` (rejected at
+  Laravel's `mimes:pdf` request-validation layer) and by truncating a real
+  PDF's header (passed the extension/MIME check but correctly rejected by
+  the `pdfinfo` structural check with *"not a valid single-source PDF"*).
+  An out-of-range `replacementPage` against a real single-page upload is
+  rejected the same way.
+
+### A real bug found and fixed during this phase's own testing
+
+`WorkingCopyManager::cleanupScratchDir()` computed the scratch-directory
+prefix as `Storage::disk('temp')->path('') . DIRECTORY_SEPARATOR` — but
+`path('')` already returns the disk root *with* a trailing slash, so the
+extra separator produced a double-slash needle that never matched inside
+`Str::after()`. `Str::after()` silently returns its input unchanged when the
+needle isn't found, so `deleteDirectory()` was being called with a full
+absolute path where a disk-relative one was expected — a silent no-op.
+Caught by directly inspecting `storage/app/private/temp/edit-scratch/` after
+roughly twenty real operations and finding ~18 orphaned directories instead
+of zero. Fixed by dropping the redundant separator; re-verified across
+several more successful *and* intentionally-failing operations that the
+directory is now empty after every single one.
+
+### Infrastructure note (not a code change)
+
+`php artisan serve`'s spawned PHP built-in server does not forward `-d` ini
+overrides passed to the outer `artisan serve` command — discovered when
+testing the 261-page/8.9MB file against the default `upload_max_filesize=2M`/
+`post_max_size=8M` returned a real `413`. Worked around for testing by
+running `php -d upload_max_filesize=110M -d post_max_size=120M -S
+127.0.0.1:8000 -t public` directly. This is a genuine **production/deployment
+requirement**, not a Phase 3 code concern: whatever serves this app for real
+(php-fpm + nginx/Apache) must set `upload_max_filesize`/`post_max_size` in
+its actual `php.ini` to comfortably exceed `DOCUMENTS_MAX_UPLOAD_MB`
+(currently 100MB) plus multipart overhead — Laravel's own validation rule is
+not sufficient on its own if the webserver rejects the request first.
+
+### What Phase 3 (backend) does NOT include
+
+The frontend — no ORGANIZE ribbon wiring, no page-thumbnail selection UI, no
+drag-and-drop, no undo/redo buttons, no Save/Save As dialogs (all planned for
+Phase 3's frontend half). No OCR, conversion, compression, signing, AI, forms,
+or annotations. No real login/register UI (same dev-auth-shortcut caveat as
+Phase 2). Content-level editing (text/image edits within a page) is out of
+scope for every phase so far — Phase 3 is page-structure operations only.

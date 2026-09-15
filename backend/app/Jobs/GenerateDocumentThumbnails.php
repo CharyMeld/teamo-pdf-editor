@@ -14,10 +14,15 @@ use Throwable;
 
 /**
  * Queued (database driver — see ARCHITECTURE.md's job architecture) page
- * rendering for a normal, unencrypted upload. Password-protected uploads
- * are rendered synchronously from DocumentController::unlock() instead,
- * specifically so a password never has to be serialized into the `jobs`
- * table (see DocumentThumbnailRenderer's docblock).
+ * rendering for a normal, unencrypted upload OR a freshly-saved version
+ * (Phase 3's Save). Password-protected uploads are rendered synchronously
+ * from DocumentController::unlock() instead, specifically so a password
+ * never has to be serialized into the `jobs` table (see
+ * DocumentThumbnailRenderer's docblock).
+ *
+ * Takes an explicit `versionId` (not "version 1") — Phase 2 only ever had
+ * one version per document, but Phase 3's Save creates new ones, so the
+ * job must render whichever version it was dispatched for.
  */
 class GenerateDocumentThumbnails implements ShouldQueue
 {
@@ -29,6 +34,7 @@ class GenerateDocumentThumbnails implements ShouldQueue
 
     public function __construct(
         public readonly int $documentId,
+        public readonly int $versionId,
         public readonly int $documentJobId,
     ) {}
 
@@ -36,7 +42,7 @@ class GenerateDocumentThumbnails implements ShouldQueue
     {
         $document = Document::findOrFail($this->documentId);
         $job = DocumentJob::findOrFail($this->documentJobId);
-        $version = $document->versions()->where('version_number', 1)->firstOrFail();
+        $version = $document->versions()->findOrFail($this->versionId);
 
         try {
             $renderer->render($document, $version, null, $job);
