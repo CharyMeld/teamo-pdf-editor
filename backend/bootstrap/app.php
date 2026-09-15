@@ -23,18 +23,28 @@ return Application::configure(basePath: dirname(__DIR__))
             if ($request->is('api/*') || $request->expectsJson()) {
                 $status = match (true) {
                     $e instanceof \App\Exceptions\DomainException => $e->statusCode(),
+                    $e instanceof \Illuminate\Validation\ValidationException => 422,
+                    $e instanceof \Illuminate\Database\Eloquent\ModelNotFoundException => 404,
+                    $e instanceof \Illuminate\Auth\AuthenticationException => 401,
+                    $e instanceof \Illuminate\Auth\Access\AuthorizationException => 403,
                     method_exists($e, 'getStatusCode') => $e->getStatusCode(),
                     default => 500,
                 };
 
-                return response()->json([
+                $body = [
                     'error' => [
                         'message' => app()->isProduction() && $status === 500
                             ? 'Internal server error.'
                             : $e->getMessage(),
                         'code' => $status,
                     ],
-                ], $status);
+                ];
+
+                if ($e instanceof \Illuminate\Validation\ValidationException) {
+                    $body['error']['fields'] = $e->errors();
+                }
+
+                return response()->json($body, $status);
             }
         });
     })->create();

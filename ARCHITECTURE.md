@@ -358,3 +358,219 @@ dead or fake-working button. Backend is untouched; this phase is entirely
   panel is not rendered at that width. Zero console errors across the
   session. Screenshots at 1440×900 / 820×1180 / 390×844 additionally
   confirm the visual layout at each breakpoint.
+
+## Phase 2 — PDF viewing/rendering engine (2026-09-15)
+
+Users can now open a real PDF and see it rendered in the workspace. This phase
+is OPEN → VALIDATE → LOAD → RENDER only — **no editing, OCR, conversion,
+compression, or signing** exists yet, and the HOME tab's `open` command is the
+only registry command that moved from `"unavailable"` to `"available"`.
+
+### Backend (`backend/`)
+
+- **Upload / validate / load** — `DocumentController::store()`: real content
+  MIME sniff via PHP `finfo` (not the client's `Content-Type` or filename
+  extension), a configurable max size (`config/documents.php`,
+  `DOCUMENTS_MAX_UPLOAD_MB`, default 100MB), then `pdfinfo` against the
+  uploaded file to detect corruption before anything is persisted. The
+  original bytes are written once, untouched, to
+  `documents/{uuid}/original/original.pdf` on the `documents` disk and never
+  modified again — verified by `sha256` comparison against the source file
+  both immediately after upload and after the thumbnail job completes.
+  **Storage-path clarification**: Phase 0's convention strings
+  (`documents/{uuid}/...`) describe paths *on the `documents` disk*, whose
+  root already **is** `storage/app/private/documents` — the actual
+  disk-relative paths written by this phase omit the redundant leading
+  `documents/` segment (e.g. `{uuid}/original/original.pdf`,
+  `{uuid}/versions/{n}/thumbnails/{page}.png`), to avoid a doubled
+  `documents/documents/...` directory.
+- **Page rendering** — `App\Domain\Rendering\Services\DocumentThumbnailRenderer`
+  (the Rendering module's first real logic): runs `pdftoppm` per page at
+  110 DPI (`DOCUMENTS_THUMBNAIL_DPI`), reads each page's real dimensions back
+  from the rendered PNG's own pixel size (accounts for the PDF's intrinsic
+  rotation automatically, since `pdftoppm` bakes it into the raster), and
+  writes one `document_pages` row + one thumbnail PNG per page. A single bad
+  page doesn't fail the whole document — it's skipped and simply has no
+  thumbnail row, which the frontend treats as a real per-page error state,
+  not silent success.
+- **Background jobs** — `App\Jobs\GenerateDocumentThumbnails` (queued,
+  `database` driver, the Jobs module's first real job class) handles the
+  normal unencrypted-upload path; `document_jobs.progress_percent` is updated
+  page-by-page and is what the frontend polls.
+- **Password handling** — password-protected uploads are accepted and stored
+  (status `password_protected`) but not queued for rendering. On
+  `POST /api/documents/{id}/unlock`, the password is verified server-side
+  (a `pdfinfo -upw` check) and, on success, passed straight into
+  `DocumentThumbnailRenderer` **synchronously — deliberately not queued** —
+  so it never has to be serialized into the `jobs` table. It exists only as
+  a plain local PHP variable on that request's call stack: never persisted,
+  logged, or queued. The stored original stays genuinely encrypted at rest;
+  the frontend independently re-supplies the same password to pdf.js when it
+  opens the file for the canvas, so nothing is ever decrypted-and-rewritten
+  server-side.
+- **Status model** — `documents.status` gained `password_protected`
+  alongside the existing values; `documents.page_count` and
+  `document_pages.thumbnail_path` are new columns
+  (`2026_09_15_130000_add_phase2_columns_to_documents_and_pages.php`, a raw
+  `ALTER TABLE ... MODIFY` for the enum since this project doesn't depend on
+  doctrine/dbal).
+- **Audit** — the Audit module's first real writes:
+  `document.uploaded` (on upload), `document.opened` (on
+  `GET /api/documents/{id}`, not the lightweight polling `.../status`
+  endpoint), `document.unlocked` / `document.unlock_failed`.
+- **Dev-only auth shortcut** — `DevAuthController` (`POST /api/dev/login`,
+  hard-gated to `app()->environment('local')`, 404s otherwise) logs in a
+  single seeded `dev@teamo.local` user via a real Sanctum SPA session — not
+  a mock: it's the same session mechanism a real login endpoint will use.
+  There is still no login/register UI; this exists only so
+  `documents.user_id` (a real foreign key) has something real to point at
+  until Auth ships its own phase. `routes/web.php` also gained a stub
+  `GET /login` route — Laravel's default `Authenticate` middleware resolves
+  `route('login')` to build an unused redirect target on every
+  `AuthenticationException`, and without a route by that name it throws a
+  `RouteNotFoundException` that masks the real 401; the stub exists purely
+  so that resolution doesn't fail (nothing ever navigates there — API
+  requests always get the real JSON 401).
+- **Exception handling** — `bootstrap/app.php`'s JSON envelope now also maps
+  `ValidationException` → 422 (with field errors), `ModelNotFoundException` →
+  404, and `AuthenticationException`/`AuthorizationException` → 401/403,
+  closing a gap where these fell through to a generic 500.
+
+### Frontend (`frontend/src/`)
+
+- **`lib/pdf.ts`** — the one place `pdfjs-dist` is configured (Vite-native
+  worker resolution via `new URL(...)`). Rendering is client-side pdf.js
+  fetching real bytes from `GET /api/documents/{id}/file`
+  (`withCredentials: true`; a `BinaryFileResponse`, so HTTP Range requests
+  work — confirmed via `curl -r 0-999` returning real `206 Partial
+  Content`/`Content-Range`; pdf.js itself chose to stream the whole file in
+  one request rather than issue explicit ranged fetches for the 9MB/261-page
+  test file over local network, which is expected adaptive pdf.js behavior,
+  not a bug — the capability is real and server-verified even though this
+  particular file didn't exercise it in-browser). This is *display* only —
+  all storage/validation/business logic stays server-side per the existing
+  API/service boundary rule.
+- **`hooks/useOpenDocument.tsx`** — owns the whole open-document lifecycle:
+  upload, status polling while the backend job runs, password unlock, the
+  shared `pdfjs-dist` document instance (loaded once, used by both the
+  canvas and search), and a client-side search index built from that same
+  document's real per-page `getTextContent()` (yields periodically so a
+  261-page index-build doesn't jank the canvas). `hooks/useDocumentViewState.tsx`
+  gained real `documentId`/`currentPage`/`totalPages`/`goToPage` (Phase 1 had
+  these fixed at 0/no-ops) plus `syncComputedZoomPercent`, a setter Fit
+  Page/Fit Width use to publish their computed scale without clearing
+  `fitMode` (unlike the user-facing `setZoomPercent`, which is an explicit
+  manual override).
+- **`PdfViewer.tsx`** — continuous-scroll canvas with real virtualization: an
+  `IntersectionObserver` (not a scroll-position heuristic) decides which
+  pages are near the viewport and get a real `<canvas>`; everything else is
+  a correctly-sized empty placeholder sized from the backend's real
+  `width_pt`/`height_pt`. Verified bounded at 2–3 rendered canvases at a time
+  while scrolling the 261-page test document, both at page 1 and after
+  jumping to page 150. Each page's render is guarded by a monotonically
+  increasing per-page token, not just `RenderTask.cancel()` — a real bug
+  caught during testing (two zoom clicks in quick succession raced two
+  `render()` calls on the same `<canvas>`, and the loser's rejection was
+  briefly mistaken for a genuine per-page failure) is fixed by having every
+  `.then`/`.catch` check it's still the current attempt before touching the
+  canvas or `pageErrors` state.
+- **Thumbnails** — `ThumbnailPanel`/`ThumbnailItem` render real
+  `<img crossOrigin="use-credentials">` tags against
+  `GET /api/documents/{id}/pages/{n}/thumbnail`; a page not yet thumbnailed
+  shows a real loading spinner, not a placeholder image.
+- **Password flow** — `PasswordPrompt` (inline, not a modal — there's nothing
+  useful behind it) calls `POST /api/documents/{id}/unlock`; wrong password
+  shows a real inline error and the form stays open; correct password
+  retains the plaintext only in a component-local ref, used solely to hand
+  the same password to pdf.js so it can open the still-encrypted original.
+- **`OpenDocumentDialog`** (`components/dialogs/`, built on a new
+  `components/ui/Dialog.tsx` focus-trap primitive) — drag-and-drop or file
+  picker upload, plus a real "Open recent" list from
+  `GET /api/documents`. This is what `home.open`'s `run` is wired to,
+  supplied by whichever component renders that command (`CommandRibbon`,
+  `AppHeader`'s search, `PdfCanvas`'s empty state) via `CommandButton`'s
+  existing `onRun` override — not a special case outside the registry.
+- **Smart Inspector** — `DocumentPanel`/`PagePanel` now show real
+  title/page-count/file-size/upload-date/status and real per-page geometry
+  once a document is open, replacing Phase 1's permanent `"—"` placeholders;
+  they still show honest placeholders with nothing open.
+
+### Deviations from the original Phase 2 brief
+
+- Password-protected documents render synchronously (not queued) — see
+  above; this is a correctness requirement (never persist a password), not
+  scope creep.
+- `bootstrap/app.php` and `routes/web.php` gained small, necessary fixes
+  (exception-status mapping, the `login` route stub) surfaced by real testing
+  of the auth/error paths, not planned features.
+
+### What Phase 2 does NOT include
+
+Real page/text/image editing, OCR, conversion, compression, signing, AI, a
+real login/register UI, or a "working copy" persistence mechanism (still
+deferred per the document state model above — Phase 2 only ever touches the
+read-only "original" version and pure client-side view state). Only
+`home.open` is `"available"` in the command registry; every other command
+remains honestly `"unavailable"`.
+
+### Verified working (2026-09-15)
+
+All of the following were exercised against the real running
+`php artisan serve` + `php artisan queue:work` + `npm run dev` stack — not
+inferred from code review — using either `curl` (for API-level checks,
+including cookie/CSRF-carrying requests simulating the SPA) or a small
+Chrome DevTools Protocol script driving real Chrome (no Playwright/Puppeteer
+installed in this environment; Node 22's native `WebSocket`/`fetch` were
+enough, no new dependency added):
+
+- `php artisan migrate --force`: the new Phase 2 migration ran clean against
+  `teamo_pdf_editor`, alongside all prior migrations (12 total).
+- `tsc -b && vite build`: zero errors, both before and after the render-race
+  fix above.
+- **Single-page PDF**: real upload → real canvas render → real matching
+  thumbnail, confirmed visually.
+- **Multi-page (8-page) text PDF**: all 8 real thumbnails; prev/next and
+  direct page-number entry both work; search for a real word from the
+  document's own text found 6 real occurrences with working next/previous
+  match navigation.
+- **Large (261-page, 8.9MB) PDF**: all 261 real thumbnails generated;
+  canvas count stayed at 2–3 throughout — at page 1, after a direct jump to
+  page 150, and after scrolling — confirming virtualization actually bounds
+  DOM/canvas count rather than rendering everything; the file endpoint's
+  Range support was confirmed via `curl -r 0-999` → real `206 Partial
+  Content`, though the in-browser pdf.js load for this file used a single
+  streamed request rather than explicit ranged fetches (stated honestly
+  above, not claimed as something it wasn't).
+- **Password-protected PDF, wrong-password path**: verified on the user's
+  own real encrypted file (`Lessons_in_translation_...pdf`) — real inline
+  "Incorrect password" error, form stays open, backend logs
+  `document.unlock_failed`.
+- **Password-protected PDF, full unlock path**: the real file's actual
+  password is unknown, so this was verified end-to-end on a
+  Ghostscript-synthesized encrypted PDF (`-sUserPassword=secret123`, 8 pages,
+  RC4) where the correct password is known — wrong password rejected first,
+  then the correct password unlocked, processed, and rendered all 8 pages
+  correctly. This also caught and fixed a real backend bug: a PDF requiring
+  an *open* password (not just an owner/permissions password) makes
+  `pdfinfo` exit non-zero with "Incorrect password" even before any password
+  is supplied, which the original code mistook for corruption; it's now
+  correctly detected as `password_protected` by checking for that specific
+  stderr message before falling back to "corrupted".
+- **Corrupted PDF** (a truncated copy of a real PDF): real, clear rejection
+  at upload time — "could not be read as a PDF — it may be corrupted" — no
+  crash, upload dialog stays open for another try.
+- **Unsupported file type** (a PNG renamed to `.pdf`): rejected by the real
+  `finfo` content sniff despite the `.pdf` extension and a spoofed
+  multipart `Content-Type`.
+- **Oversized PDF**: `DOCUMENTS_MAX_UPLOAD_MB` temporarily lowered to 5 in
+  `.env`, a 12MB file rejected with a clear real error, config restored to
+  100 afterward and reconfirmed.
+- **Scanned/image-only PDF** (synthesized via `pdftoppm` + `img2pdf`, zero
+  extractable text): renders and thumbnails correctly like any other PDF;
+  the search box honestly shows "No searchable text in this document" and is
+  disabled, rather than silently returning zero matches indistinguishable
+  from "found nothing."
+- **Original-file-untouched guarantee**: `sha256sum` of the stored original
+  matched the source file's checksum exactly, checked both immediately after
+  upload and again after the thumbnail job completed.
+- Zero browser console errors across every scenario above.

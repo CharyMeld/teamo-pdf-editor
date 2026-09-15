@@ -18,6 +18,7 @@ class DocumentPage extends Model
         'width_pt',
         'height_pt',
         'rotation_degrees',
+        'thumbnail_path',
         'created_at',
     ];
 

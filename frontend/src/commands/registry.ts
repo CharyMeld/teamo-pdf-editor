@@ -23,7 +23,13 @@ export const REGISTRY: Command[] = [
     keywords: ["upload", "import", "load", "file"],
     icon: "open",
     shortcut: "Ctrl+O",
-    status: UNIMPLEMENTED,
+    // Real as of Phase 2 (PDF viewing/rendering) — see useOpenDocument
+    // and DocumentController. This is the first command in the registry
+    // to flip from "unavailable"; its `run` is wired by whichever
+    // component renders it (CommandRibbon, AppHeader's search, PdfCanvas's
+    // empty state), all via the same onRun mechanism CommandButton
+    // already supports — never a special case outside the registry.
+    status: "available",
   },
   {
     id: "home.save",

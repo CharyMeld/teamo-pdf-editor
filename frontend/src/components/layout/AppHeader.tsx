@@ -2,9 +2,13 @@ import { useId, useRef, useState } from "react";
 import { getCommand } from "../../commands/registry";
 import { useCommandSearch } from "../../commands/useCommandSearch";
 import { useActiveTab } from "../../hooks/useActiveTab";
+import { useOpenDocument } from "../../hooks/useOpenDocument";
+import { formatBytes } from "../../lib/format";
+import { presentDocumentStatus } from "../../lib/documentStatus";
 import DropdownMenu from "../ui/DropdownMenu";
 import Icon from "../ui/Icon";
 import IconButton from "../ui/IconButton";
+import StatusIndicator from "../ui/StatusIndicator";
 
 function TeamOMark() {
   // Original geometric monogram — a stacked "T" on a rounded document tile,
@@ -17,7 +21,11 @@ function TeamOMark() {
   );
 }
 
-function CommandSearch() {
+interface CommandSearchProps {
+  runHandlers: Record<string, () => void>;
+}
+
+function CommandSearch({ runHandlers }: CommandSearchProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
   const [open, setOpen] = useState(false);
@@ -30,7 +38,7 @@ function CommandSearch() {
     const command = results[index];
     if (!command) return;
     setActiveTab(command.tab);
-    if (command.status === "available") command.run?.();
+    if (command.status === "available") (runHandlers[command.id] ?? command.run)?.();
     setOpen(false);
     setQuery("");
     inputRef.current?.blur();
@@ -125,19 +133,47 @@ function CommandSearch() {
   );
 }
 
-export default function AppHeader() {
-  const { setActiveTab } = useActiveTab();
-  const settingsCommand = getCommand("home.properties");
+/** The open document's filename/size/status — real data once a document
+ * is open (Phase 2), nothing shown otherwise. */
+function DocumentInfo() {
+  const { document: doc } = useOpenDocument();
+  if (!doc) return null;
+  const status = presentDocumentStatus(doc.status);
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-4 border-b border-border bg-surface px-3">
+    <div className="hidden min-w-0 items-center gap-2 rounded-md border border-border px-2 py-1 lg:flex">
+      <Icon name="document" size={13} className="shrink-0 text-text-subtle" />
+      <span className="max-w-48 truncate text-xs text-text" title={doc.filename}>
+        {doc.filename}
+      </span>
+      <span className="shrink-0 text-[10px] text-text-subtle">{formatBytes(doc.sizeBytes)}</span>
+      <StatusIndicator status={status.tone} label={status.label} />
+    </div>
+  );
+}
+
+export default function AppHeader() {
+  const { setActiveTab } = useActiveTab();
+  const { showOpenDialog } = useOpenDocument();
+  const settingsCommand = getCommand("home.properties");
+
+  const runHandlers: Record<string, () => void> = {
+    "home.open": showOpenDialog,
+  };
+
+  return (
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
       <div className="flex shrink-0 items-center gap-2">
         <TeamOMark />
         <span className="text-sm font-semibold tracking-tight text-text">TeamO PDF Editor</span>
       </div>
 
-      <div className="flex-1">
-        <CommandSearch />
+      <div className="w-56 shrink-0 sm:w-72">
+        <CommandSearch runHandlers={runHandlers} />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <DocumentInfo />
       </div>
 
       <div className="flex shrink-0 items-center gap-1">

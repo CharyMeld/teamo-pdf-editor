@@ -1,22 +1,49 @@
 import { usePanelVisibility } from "../../hooks/usePanelVisibility";
+import { useDocumentViewState } from "../../hooks/useDocumentViewState";
+import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import EmptyState from "../ui/EmptyState";
 import IconButton from "../ui/IconButton";
+import ThumbnailItem from "./ThumbnailItem";
 
-/** LEFT pane: the real page-thumbnail panel architecture — a scrollable
- * list container with an honest empty state. Once the Pages module ships,
- * a `documents.currentVersion.pages.map(page => <ThumbnailItem .../>)`
- * list replaces the EmptyState below; no fake gray boxes stand in for
- * pages until real thumbnails exist. On tablet/mobile this renders as an
- * off-canvas drawer instead of a docked pane. */
+/** LEFT pane: the real page-thumbnail panel — a scrollable list of the
+ * document's actual pages (from GET /api/documents/{id}/pages), each a
+ * real server-rendered thumbnail image. Clicking one jumps the canvas to
+ * that page. While the backend's thumbnail job is still running, pages
+ * not yet ready show a real loading state, not a placeholder image. On
+ * tablet/mobile this renders as an off-canvas drawer instead of a docked
+ * pane. */
 export default function ThumbnailPanel() {
   const isTablet = useMediaQuery(BREAKPOINTS.tablet);
   const { thumbnailOpen, closeThumbnail } = usePanelVisibility();
+  const { document: doc, pages } = useOpenDocument();
+  const view = useDocumentViewState();
+
+  const totalPages = doc?.pageCount ?? 0;
+  const readyPageNumbers = new Set(pages.filter((p) => p.thumbnailReady).map((p) => p.pageNumber));
 
   const body = (
     <div className="flex h-full flex-col overflow-y-auto bg-surface-muted">
-      {/* Future: documents.currentVersion.pages.map(page => <ThumbnailItem key={page.id} page={page} />) */}
-      <EmptyState icon="document" title="No document open" description="Thumbnails appear here once a document is loaded." />
+      {!doc || totalPages === 0 ? (
+        <EmptyState
+          icon="document"
+          title="No document open"
+          description="Thumbnails appear here once a document is loaded."
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-2 p-2">
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNumber) => (
+            <ThumbnailItem
+              key={pageNumber}
+              documentId={doc.id}
+              pageNumber={pageNumber}
+              ready={readyPageNumbers.has(pageNumber)}
+              active={view.currentPage === pageNumber}
+              onSelect={view.goToPage}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 

@@ -21,13 +21,21 @@ class Document extends Model
         'mime_type',
         'size_bytes',
         'status',
+        'page_count',
     ];
 
     protected function casts(): array
     {
         return [
             'size_bytes' => 'integer',
+            'page_count' => 'integer',
         ];
+    }
+
+    /** Documents are addressed publicly by UUID, never the internal id. */
+    public function getRouteKeyName(): string
+    {
+        return 'uuid';
     }
 
     public function user(): BelongsTo

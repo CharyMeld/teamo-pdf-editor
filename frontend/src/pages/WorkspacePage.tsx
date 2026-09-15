@@ -1,4 +1,5 @@
 import AppHeader from "../components/layout/AppHeader";
+import OpenDocumentDialog from "../components/dialogs/OpenDocumentDialog";
 import CommandRibbon from "../components/ribbon/CommandRibbon";
 import DocumentWorkspace from "../components/workspace/DocumentWorkspace";
 import StatusBar from "../components/workspace/StatusBar";
@@ -13,6 +14,7 @@ export default function WorkspacePage() {
         <DocumentWorkspace />
         <StatusBar />
       </div>
+      <OpenDocumentDialog />
     </WorkspaceProviders>
   );
 }
