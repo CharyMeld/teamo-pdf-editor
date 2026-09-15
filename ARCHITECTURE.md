@@ -973,3 +973,264 @@ management UI beyond the minimal "pick a document to merge with" / "open
 the document that just got extracted/split/saved-as" affordances described
 above — that's Phase 13 per the user's own roadmap. No backend changes
 beyond the one documented health-check middleware fix.
+
+## Phase 4 (backend) — real PDF content-editing engine (2026-09-15)
+
+EDIT's TEXT/IMAGE/OBJECT commands are now real, against the same "working
+copy" Phase 3 built — content edits are just another kind of
+`document_edit_operations` step, so undo/redo/Save/Save As all work
+identically without any new mechanism. **Backend only** — no frontend work
+this phase; the ribbon's EDIT commands stay `"unavailable"` until the
+frontend half wires them up.
+
+### Honest scope boundary — read before extending this
+
+True in-place editing of arbitrary pre-existing PDF text (reflowing an
+existing sentence's own content-stream operators, arbitrary real-world fonts/
+encodings) is not reliably achievable with the tools available, and the
+user's own brief explicitly anticipated this ("where a PDF's underlying
+structure prevents direct modification, implement a technically sound
+overlay/editing strategy and clearly distinguish it from true source-content
+modification"; "duplicate where technically supported"). The real, honest
+scope implemented:
+
+- **Add text** — TRUE new PDF content: real font/size/bold/italic/color/
+  alignment/line-spacing, composed into the actual page content stream via
+  FPDI/FPDF. Verified genuinely extractable via `pdftotext` (not a raster
+  picture of text).
+- **Edit text** — a real, explicitly-tagged **overlay edit**
+  (`type: "text_overlay_edit"`): a background-matching rectangle covers the
+  original text's bounding box, with new real text drawn on top. Clearly
+  distinct in the data model from `type: "text"` (true new content) — never
+  conflated.
+- **Insert image** — a TRUE new embedded image XObject (verified via
+  `pdfimages -list`), not a flattened screenshot.
+- **Image select/move/resize/rotate/delete/duplicate** — fully real, but
+  ONLY for images this system itself inserted (it knows their exact
+  parameters). Manipulating a PRE-EXISTING image already embedded in the
+  original PDF (parsing and rewriting an unknown foreign content stream's
+  placement matrix) is explicitly **out of scope** — not attempted, not
+  faked. This module only ever manages objects it created.
+- **Objects (select/move/resize/delete/duplicate)** — applies uniformly to
+  the text/image objects this system manages, satisfying "duplicate where
+  technically supported" honestly.
+- **Preserve original content wherever possible** — every recomposition
+  rebuilds each page from the document's true clean page-structure state
+  (never stacks overlay-on-overlay), and version 1 (the original upload) is
+  never touched by any Phase 4 operation — reverified via `sha256` after a
+  sequence of ten real content/page operations and a Save.
+
+**Deliberate, documented limitation**: once a page-structural operation
+(rotate/crop/delete/reorder/...) runs on top of a working state that has
+active content objects, those objects' real pixels/text become permanently
+part of the page from then on (qpdf carries real content through correctly —
+verified: a `REPLACED HEADER TEXT` overlay edit and other content survived a
+subsequent page-5 rotate operation intact), but they stop being independently
+selectable/movable/deletable as objects — the next content operation starts a
+fresh, empty object chain from that new clean point. Analogous to
+"flattening" in other editors; an intentional scope boundary, not an
+oversight.
+
+### Engine
+
+`setasign/fpdi` + `setasign/fpdf` (both free/open-source, no commercial
+license) — FPDI imports each existing page as a template (its real content,
+untouched); FPDF draws new text/images on top with real parameters.
+Constructed with unit `'pt'` (`new RotatingFpdi('P', 'pt')`) so every
+coordinate is a direct PDF point with no conversion layer — `k = 1`
+internally, confirmed against FPDF's own source. Available fonts: FPDF's
+three core fonts only — **Helvetica** (Arial accepted as an alias),
+**Times**, **Courier** — no embedding-rights concerns; an unknown font name
+is rejected with the available list in the error message.
+
+`App\Domain\Editing\Services\RotatingFpdi` extends FPDI with the standard,
+well-known FPDF rotation technique (a `q ... cm ... Q` content-stream block
+around each rotated object, pivoting on its own center) — real PDF
+content-stream manipulation via the `cm` operator, not a raster trick.
+
+### A real bug found and fixed during this phase's own testing
+
+FPDF's `SetFont()`/`SetFontSize()` silently skip re-emitting the `Tf` (font
+selection) operator whenever their internally cached family/style/size
+already match the request — a correct optimization for FPDF's own normal,
+single continuous document flow. But `RotatingFpdi`'s raw `q`/`Q` rotation
+wrapping can revert the PDF graphics state (which text-state parameters,
+including the selected font, are part of per PDF spec §9.3) **underneath**
+that cache, with no way for FPDF to know. Without a fix, a second object
+using the identical font/size as a previous one on the same page got no font
+selected inside its own `Tj` show operator — a real corrupt PDF, caught via
+`pdftotext`: `"Syntax Error: No font in show"`, and confirmed at the
+raw-content-stream level (`qpdf --qdf`) showing the `Tf` operator emitted
+once, outside the text-showing block it was needed in, then silently skipped
+for the second object entirely. Fixed by `RotatingFpdi::resetFontCache()`,
+called immediately before every `SetFont()` in `PdfContentEngine::drawText()`
+— forces FPDF to always freshly re-emit the font selection inside each
+object's own graphics-state bracket. Re-verified with two non-rotated
+same-font objects (isolating the fix from the rotation case): both now
+extract cleanly and separately via `pdftotext`, and the original rotated
+repro case renders two fully legible, independently-styled rotated text
+objects with `qpdf --check` reporting no errors.
+
+Also fixed in the same pass: FPDF's default `AutoPageBreak` (an
+unwanted document-flow feature for a tool doing manual absolute-position
+placement on pre-existing pages) is now explicitly disabled
+(`SetAutoPageBreak(false)`) before composing, avoiding a class of
+silent extra-page-insertion bugs from ever being possible.
+
+### Recomposition model
+
+Reuses Phase 3's `document_edit_operations` step/pointer chain exactly — no
+new table, no new model. Each content mutation (add, update, delete,
+duplicate) is committed as a new step via the existing
+`WorkingCopyManager::commitStep()`, whose `payload` JSON now also holds, for
+content-type steps:
+
+- `contentObjects` — the full current object list for the whole document,
+  including inactive (soft-deleted) entries, so undo can resurrect one for
+  free just by the pointer moving back — no special-case resurrection code
+  needed, verified via undo bringing a deleted object visibly back.
+- `sourceStepId` / `sourceVersionId` (exactly one set) — the "clean"
+  page-structure state (no content objects of its own baked in) every
+  content step in a chain recomposes from, every time, so objects never
+  stack/ghost. When the current step is itself a content step, a new
+  mutation inherits *its* source (not its own output file); when the
+  current step is a page operation (or there is no step), that state is
+  clean by definition and becomes the new chain's base with an empty
+  object list — confirmed via direct payload inspection
+  (`sourceStepId` correctly pointed at the page-op step, `contentObjects`
+  correctly started at a single fresh entry) after interleaving a Phase 3
+  rotate between two content edits.
+
+`WorkingCopyManager::resolveAbsolutePath(?stepId, ?versionId)` — the one
+small, additive extension Phase 4 needed on Phase 3's manager — resolves
+either reference to an absolute file path.
+
+Thumbnail regeneration for a content step is unchanged from Phase 3 — it's
+just another `commitStep()` call, so `GenerateWorkingThumbnails` fires
+automatically with no Phase 4-specific code.
+
+### API
+
+All under `/api/documents/{uuid}/content/objects`, `auth:sanctum`, same
+`{operationId, sequenceNumber, pageCount, thumbnailJobId, status, canUndo,
+canRedo}` envelope as Phase 3's operations plus an `objectId`:
+
+| Method | Path | Body |
+|---|---|---|
+| GET | `/content/objects?page={n}` | — (page optional) → `{data: [...], availableFonts: [...]}` |
+| POST | `/content/objects` | `{type: 'text'\|'text_overlay_edit'\|'image', page, x, y, width, height, rotation?, zIndex?, params, file?}` (multipart when `type: 'image'`) |
+| PATCH | `/content/objects/{objectId}` | any of `x, y, width, height, rotation, zIndex, params` (partial — merges into the existing object) |
+| DELETE | `/content/objects/{objectId}` | — (soft-deactivates; undo-able) |
+| POST | `/content/objects/{objectId}/duplicate` | — (clones with a +12pt offset, new id) |
+
+Coordinates: bottom-left-origin PDF points, the same convention Phase 3's
+crop feature established. `text`/`text_overlay_edit` params: `text, font,
+fontSize, bold, italic, color (#RRGGBB), align (left/center/right/justify),
+lineSpacing`; `text_overlay_edit` additionally requires
+`coverOriginal: {x,y,width,height}` and accepts `coverColor` (default
+white). `image` objects are normalized to PNG server-side (via GD) at
+upload time regardless of source format (PNG/JPEG/GIF/WebP/BMP accepted,
+validated by real `finfo` content sniff, not extension), guaranteeing FPDF
+compatibility; the disk path is never exposed to the client — only
+`originalFilename`.
+
+### Verified working (2026-09-15)
+
+All against the live `php artisan serve` + `queue:work` stack, using
+`curl` with a real cookie-jar-carried Sanctum session (the same dev-login
+flow the SPA uses) against the real 8-page test PDF, with every claim
+checked against the actual output file (`pdftotext`, `pdfimages -list`,
+`pdftoppm` render + visual inspection, `pdfinfo`, `qpdf --check`), never the
+API's JSON response alone:
+
+- **Add text**: real, extractable, styled (bold, red) text landed exactly
+  at the specified position; original page content fully intact underneath.
+- **Move/restyle/rotate** (single `PATCH`): position, color (red→blue),
+  style (upright→italic), and a real 15° rotation (genuine `cm`-matrix
+  transform, confirmed visually tilted) all applied correctly in one call,
+  with the old (red, unrotated) state completely gone — no ghosting.
+- **Delete**: text genuinely absent from `pdftotext` output afterward.
+- **Undo** after delete: correctly restored to the pre-delete (moved/
+  rotated) state.
+- **Duplicate**: two independently-editable copies, offset by 12pt — this
+  is what surfaced and got fixed the font-cache bug above; re-verified
+  clean after the fix (both instances fully legible in the rendered image,
+  `qpdf --check` reports no errors, and a follow-up non-rotated same-font
+  pair both extract separately via `pdftotext`).
+- **Redo-branch pruning**: applying duplicate from a non-tip pointer
+  correctly discarded the abandoned step (row and file both gone) — the
+  exact same mechanism Phase 3 already proved, now exercised by a content
+  operation for the first time.
+- **Insert image**: a real 120×80 RGB PNG XObject (confirmed via
+  `pdfimages -list`) rendered correctly on the target page.
+- **Image move/resize/rotate**: repositioned, resized to 180×120, and
+  rotated 30° in one `PATCH` — old position/size fully gone, no ghosting.
+- **Image delete**: confirmed gone via `pdfimages -list`, while a
+  pre-existing image already in the original document (same dimensions/
+  size as the unedited source file's own baseline) correctly remained.
+- **Overlay text edit**: a real white redaction rectangle plus real
+  replacement text (`pdftotext`-extractable) landed exactly as specified.
+- **Undo/redo interleaved with a real Phase 3 page operation**: rotated
+  page 5 via the existing `/operations/rotate` endpoint on top of five
+  content edits, confirmed the content edits survived intact (baked into
+  the page, per the documented scope boundary) and the rotation applied
+  correctly (verified both via `pdfinfo`'s page-rotation field on the
+  step right after the qpdf rotate, and via a visual render after FPDI
+  re-imported it — the rotation persists correctly through FPDI's import
+  even though it's represented differently afterward: baked into the
+  page's own dimensions/content rather than carried as a separate
+  `/Rotate` flag, standard correct FPDI behavior, confirmed by rendering
+  the page and visually checking the content reads correctly oriented).
+  A further content edit after the page op correctly started a fresh
+  object chain from that point (`sourceStepId` pointed at the rotate
+  step, `contentObjects` started empty) — the documented scope boundary
+  working exactly as designed, not silently losing prior edits (their
+  pixels remained, confirmed via `pdftotext` still finding the earlier
+  overlay-edited text) while correctly not treating them as live objects
+  going forward.
+- **Save**: the new `document_versions` row's stored file, freshly
+  re-inspected from disk (not the working step), genuinely contains every
+  content edit and the page rotation; its `checksum_sha256` matches a
+  fresh `sha256sum` of the file exactly.
+- **Original-untouched guarantee**: version 1's file remained byte-for-byte
+  identical (`sha256sum`) to the original source PDF after ten real
+  content/page operations and a Save.
+- **Post-Save chain reset**: a content edit performed after Save correctly
+  started at `sequenceNumber: 1` again — Phase 3's existing "Save prunes
+  the pre-save chain" behavior applies to content operations for free,
+  no special-casing needed.
+- **Error handling**: an unknown font, an invalid hex color, a `PATCH`/
+  `DELETE` against a nonexistent or already-inactive `objectId`, and a
+  non-image file uploaded as `type: 'image'` (rejected by Laravel's own
+  `image` validation rule) all returned clear, specific `422`s — confirmed
+  via direct DB inspection that none of these failures created an orphan
+  `document_edit_operations` row.
+- **Out-of-range page number**: rejected with the same clear message format
+  Phase 3's page operations already use.
+- `php artisan route:list`: all five Phase 4 routes registered correctly.
+- Zero warnings or errors in the backend/queue logs across the entire test
+  session (roughly a dozen real operations, several dispatched thumbnail
+  jobs, and the intentional error-case requests).
+
+### What Phase 4 (backend) does NOT include
+
+The frontend — no EDIT ribbon wiring, no selection handles, no drag/resize/
+rotate UI, no text/font toolbar, no crop-style drag-to-place interaction for
+new objects (all planned for Phase 4's frontend half). True in-place editing
+of pre-existing PDF text content, and manipulation of images already
+embedded in the original document (see the honest scope boundary above) —
+neither is planned for any future phase without a specific, scoped decision
+to attempt the significantly harder content-stream-parsing work that would
+require. No OCR, conversion, compression, signing, AI, forms, or
+annotations. No real login/register UI (same dev-auth-shortcut caveat as
+prior phases).
+
+### Unrelated, pre-existing finding (not fixed, out of scope)
+
+`composer audit` reports a `laravel/framework` advisory (CRLF injection in
+the default email validation rule, GHSA-5vg9-5847-vvmq) — pre-existing in
+the framework version installed at Phase 0, unrelated to anything Phase 4
+touches (this app has no email-validated user input yet), and not a
+regression introduced by installing `setasign/fpdi`/`setasign/fpdf`. Left
+for a dedicated framework-upgrade decision rather than bundled into this
+phase's scope.

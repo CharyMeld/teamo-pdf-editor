@@ -55,6 +55,35 @@ class WorkingCopyManager
         return $document->page_count ?? $this->baseVersion($document)->pages()->count();
     }
 
+    /**
+     * Resolve a step-or-version reference to an absolute file path. Used by
+     * the Phase 4 content-editing engine to find the "clean" page-structure
+     * source a chain of content-edit operations is composing on top of —
+     * see ContentObjectService's docblock for why content edits need this
+     * distinct from `currentAbsolutePath()` (which may itself already be a
+     * content-composed file).
+     */
+    public function resolveAbsolutePath(?int $stepId, ?int $versionId): string
+    {
+        if ($stepId !== null) {
+            $step = DocumentEditOperation::findOrFail($stepId);
+            $absolute = Storage::disk('documents')->path($step->resulting_storage_path);
+            if (! is_file($absolute)) {
+                throw PageOperationException::processingFailed('a referenced working-copy step is missing.');
+            }
+
+            return $absolute;
+        }
+
+        if ($versionId !== null) {
+            $version = DocumentVersion::findOrFail($versionId);
+
+            return Storage::disk($version->storage_disk)->path($version->storage_path);
+        }
+
+        throw PageOperationException::processingFailed('no source step or version given.');
+    }
+
     /** The version an editing session is (or would be) based on — normally the current saved version. */
     public function baseVersion(Document $document): DocumentVersion
     {

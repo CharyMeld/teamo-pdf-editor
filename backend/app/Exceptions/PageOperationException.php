@@ -80,4 +80,29 @@ class PageOperationException extends DomainException
     {
         return new self('The replacement page source is not a valid single-source PDF.');
     }
+
+    public static function invalidFont(string $font): self
+    {
+        return new self("Unknown font '{$font}'. Available fonts: ".implode(', ', \App\Domain\Editing\Services\PdfContentEngine::AVAILABLE_FONTS).'.');
+    }
+
+    public static function invalidColor(string $value): self
+    {
+        return new self("'{$value}' is not a valid color — use a hex value like #1A2B3C.");
+    }
+
+    public static function invalidTextParams(string $detail): self
+    {
+        return new self("Invalid text content: {$detail}");
+    }
+
+    public static function invalidImageSource(): self
+    {
+        return new self('The uploaded file is not a valid, readable image.');
+    }
+
+    public static function objectNotFound(): self
+    {
+        return new self('That content object does not exist, was deleted, or belongs to a different document state.');
+    }
 }

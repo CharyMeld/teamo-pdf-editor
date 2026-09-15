@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\DevAuthController;
+use App\Http\Controllers\Api\DocumentContentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
 use Illuminate\Http\Request;
@@ -67,4 +68,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{document}/redo', [DocumentEditController::class, 'redo']);
     Route::post('/documents/{document}/save', [DocumentEditController::class, 'save']);
     Route::post('/documents/{document}/save-as', [DocumentEditController::class, 'saveAs']);
+
+    // Phase 4 (real PDF content editing — TEXT/IMAGE/OBJECT): content
+    // objects (added text, overlay text edits, inserted images) drawn onto
+    // the working copy — see ContentObjectService's docblock and
+    // ARCHITECTURE.md's Phase 4 section.
+    Route::get('/documents/{document}/content/objects', [DocumentContentController::class, 'index']);
+    Route::post('/documents/{document}/content/objects', [DocumentContentController::class, 'store']);
+    Route::patch('/documents/{document}/content/objects/{objectId}', [DocumentContentController::class, 'update']);
+    Route::delete('/documents/{document}/content/objects/{objectId}', [DocumentContentController::class, 'destroy']);
+    Route::post('/documents/{document}/content/objects/{objectId}/duplicate', [DocumentContentController::class, 'duplicate']);
 });
