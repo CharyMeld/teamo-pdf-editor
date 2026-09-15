@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./design-system/theme.css";
 
 html,
 body,
@@ -8,13 +9,17 @@ body,
 
 body {
   margin: 0;
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Consistent visible focus ring for every interactive element, applied via
+   the primitives in components/ui — see ARCHITECTURE.md's Phase 1 a11y
+   notes. Native browser outline is suppressed only when :focus-visible is
+   supported, so keyboard users always see it and mouse users don't get a
+   ring on click. */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
