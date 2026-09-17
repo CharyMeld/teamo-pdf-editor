@@ -85,4 +85,26 @@ class Document extends Model
     {
         return $this->hasMany(AuditLog::class);
     }
+
+    /**
+     * The one real serialization shape every endpoint that hands a
+     * document summary to the frontend uses — extracted from
+     * `DocumentController::serializeDocument()` once Phase 6's
+     * `ScanSessionController` needed the identical shape for a
+     * freshly-created "combined from images" document, rather than a
+     * second, divergent copy.
+     */
+    public function toSummaryArray(): array
+    {
+        return [
+            'id' => $this->uuid,
+            'title' => $this->title,
+            'filename' => $this->original_filename,
+            'mimeType' => $this->mime_type,
+            'sizeBytes' => $this->size_bytes,
+            'status' => $this->status,
+            'pageCount' => $this->page_count,
+            'createdAt' => $this->created_at?->toIso8601String(),
+        ];
+    }
 }

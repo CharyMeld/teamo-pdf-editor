@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\DocumentAnnotationController;
 use App\Http\Controllers\Api\DocumentContentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
+use App\Http\Controllers\Api\ScanSessionController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
@@ -90,4 +91,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/documents/{document}/annotations/{annotationId}', [DocumentAnnotationController::class, 'update']);
     Route::delete('/documents/{document}/annotations/{annotationId}', [DocumentAnnotationController::class, 'destroy']);
     Route::post('/documents/{document}/annotations/{annotationId}/duplicate', [DocumentAnnotationController::class, 'duplicate']);
+
+    // Phase 6 (scanning/image-import — SCAN/IMPORT -> REVIEW -> CLEAN ->
+    // REORDER -> CREATE PDF): a scan session exists independently of any
+    // Document until create-pdf hands a finished file to
+    // WorkingCopyManager::createDocumentFromFile() — see
+    // ScanSessionService/ImagesToPdfService's docblocks and
+    // ARCHITECTURE.md's Phase 6 section.
+    Route::post('/scan-sessions', [ScanSessionController::class, 'store']);
+    Route::get('/scan-sessions/{session}', [ScanSessionController::class, 'show']);
+    Route::post('/scan-sessions/{session}/images', [ScanSessionController::class, 'addImages']);
+    Route::patch('/scan-sessions/{session}/images/{imageId}', [ScanSessionController::class, 'updateImage']);
+    Route::post('/scan-sessions/{session}/reorder', [ScanSessionController::class, 'reorder']);
+    Route::delete('/scan-sessions/{session}/images/{imageId}', [ScanSessionController::class, 'destroyImage']);
+    Route::get('/scan-sessions/{session}/images/{imageId}/preview', [ScanSessionController::class, 'preview']);
+    Route::post('/scan-sessions/{session}/create-pdf', [ScanSessionController::class, 'createPdf']);
 });

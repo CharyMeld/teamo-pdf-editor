@@ -245,15 +245,6 @@ class DocumentController extends Controller
 
     private function serializeDocument(Document $document): array
     {
-        return [
-            'id' => $document->uuid,
-            'title' => $document->title,
-            'filename' => $document->original_filename,
-            'mimeType' => $document->mime_type,
-            'sizeBytes' => $document->size_bytes,
-            'status' => $document->status,
-            'pageCount' => $document->page_count,
-            'createdAt' => $document->created_at?->toIso8601String(),
-        ];
+        return $document->toSummaryArray();
     }
 }
