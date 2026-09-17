@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Editing\Services\ContentObjectService;
 use App\Domain\Editing\Services\PdfContentEngine;
+use App\Http\Controllers\Api\Concerns\AuthorizesDocumentAccess;
 use App\Http\Controllers\Controller;
 use App\Models\Document;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,8 @@ use Illuminate\Http\Request;
  */
 class DocumentContentController extends Controller
 {
+    use AuthorizesDocumentAccess;
+
     public function __construct(private readonly ContentObjectService $content) {}
 
     public function index(Request $request, Document $document): JsonResponse
@@ -109,19 +112,5 @@ class DocumentContentController extends Controller
         ]);
 
         return array_merge($base, $params);
-    }
-
-    private function authorizeOwner(Request $request, Document $document): void
-    {
-        abort_if($document->user_id !== $request->user()->id, 403);
-    }
-
-    /** Same "must be a rendered, ready document" gate Phase 3's page operations use. */
-    private function authorizeEditable(Request $request, Document $document): void
-    {
-        $this->authorizeOwner($request, $document);
-        if ($document->status !== 'ready') {
-            throw \App\Exceptions\PageOperationException::documentNotReady();
-        }
     }
 }

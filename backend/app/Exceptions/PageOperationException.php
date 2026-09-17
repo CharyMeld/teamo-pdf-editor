@@ -105,4 +105,14 @@ class PageOperationException extends DomainException
     {
         return new self('That content object does not exist, was deleted, or belongs to a different document state.');
     }
+
+    public static function annotationNotFound(): self
+    {
+        return new self('That annotation does not exist, was deleted, or belongs to a different document state.');
+    }
+
+    public static function invalidAnnotationParams(string $detail): self
+    {
+        return new self("Invalid annotation: {$detail}");
+    }
 }

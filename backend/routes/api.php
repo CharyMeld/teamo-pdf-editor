@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\DevAuthController;
+use App\Http\Controllers\Api\DocumentAnnotationController;
 use App\Http\Controllers\Api\DocumentContentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
@@ -78,4 +79,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/documents/{document}/content/objects/{objectId}', [DocumentContentController::class, 'update']);
     Route::delete('/documents/{document}/content/objects/{objectId}', [DocumentContentController::class, 'destroy']);
     Route::post('/documents/{document}/content/objects/{objectId}/duplicate', [DocumentContentController::class, 'duplicate']);
+
+    // Phase 5 (real PDF annotation engine — ANNOTATE): highlight/underline/
+    // strikethrough/freehand/rectangle/circle/arrow/text-box/sticky-note/
+    // stamp annotations drawn onto the working copy, via a parallel,
+    // independent chain from Phase 4's content objects — see
+    // AnnotationService's docblock and ARCHITECTURE.md's Phase 5 section.
+    Route::get('/documents/{document}/annotations', [DocumentAnnotationController::class, 'index']);
+    Route::post('/documents/{document}/annotations', [DocumentAnnotationController::class, 'store']);
+    Route::patch('/documents/{document}/annotations/{annotationId}', [DocumentAnnotationController::class, 'update']);
+    Route::delete('/documents/{document}/annotations/{annotationId}', [DocumentAnnotationController::class, 'destroy']);
+    Route::post('/documents/{document}/annotations/{annotationId}/duplicate', [DocumentAnnotationController::class, 'duplicate']);
 });
