@@ -1,4 +1,5 @@
 import AppHeader from "../components/layout/AppHeader";
+import CreatePdfFromImagesDialog from "../components/dialogs/CreatePdfFromImagesDialog";
 import CropDialog from "../components/dialogs/CropDialog";
 import InsertPageDialog from "../components/dialogs/InsertPageDialog";
 import MergeDialog from "../components/dialogs/MergeDialog";
@@ -27,6 +28,7 @@ export default function WorkspacePage() {
       <SplitDialog />
       <SaveAsDialog />
       <CropDialog />
+      <CreatePdfFromImagesDialog />
     </WorkspaceProviders>
   );
 }

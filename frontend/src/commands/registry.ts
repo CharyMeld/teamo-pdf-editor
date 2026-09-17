@@ -536,7 +536,12 @@ export const REGISTRY: Command[] = [
     tab: "CONVERT",
     group: "Import",
     keywords: ["image to pdf"],
-    status: UNIMPLEMENTED,
+    icon: "image",
+    // Real as of Phase 6 (scanning/image-import) — see
+    // scanning/useScanWorkflow and CreatePdfFromImagesDialog. Unlike
+    // EDIT/ANNOTATE's commands, this needs no document currently open —
+    // it always creates a brand-new one, same as Merge/Split.
+    status: "available",
   },
   {
     id: "convert.fromOffice",

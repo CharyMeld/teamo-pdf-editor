@@ -1659,3 +1659,229 @@ stroke (move + rotate only — resizing would need to rescale every stored
 point, an honest scope limit, not an oversight). No real-time collaborative
 annotation. No fix for Phase 4's own previously-documented text-composer-
 below-the-fold edge case beyond what already existed.
+
+## Phase 6 (backend) — scanning and document image processing (2026-09-17)
+
+CONVERT's "Create PDF from Images" is now real: import JPG/PNG/TIFF
+images, clean each one up (deskew, brightness, contrast, sharpen, noise
+reduction, background cleanup, crop, rotate), reorder them, and combine
+into a brand-new PDF. Unlike every prior phase, this runs **before** any
+`Document` exists, so it can't reuse `document_edit_operations` — two new
+tables (`scan_sessions`, `scan_session_images`) hold a session's images
+independently until the CREATE PDF step hands a finished file to
+`WorkingCopyManager::createDocumentFromFile()` — **reusing 100% of the
+real Phase 2 ingest pipeline** (the exact same `GenerateDocumentThumbnails`
+→ `DocumentThumbnailRenderer::render()` path Save As/Extract/Split already
+use) for the resulting document, confirmed by direct verification rather
+than assumed: the created document reached real `status: "ready"` with a
+correct real `page_count`, correct real per-page dimensions, and real
+thumbnails, with zero Phase 6-specific ingest code.
+
+### Non-destructive by construction, not by convention
+
+"Do not destroy the original images" gets the same architectural
+treatment Phase 4/5 gave "never touch version 1": every cleanup adjustment
+lives in a `params` JSON column only, applied fresh from
+`original_storage_path` (the exact uploaded bytes, unmodified, on the
+durable `documents` disk — never `temp`, which is documented as
+swept/transient) every time a preview or the final PDF is rendered.
+`ScanImageProcessor`'s every method takes a source path and writes a
+**new** file — there is no code path that opens a source for writing back
+to itself. Verified, not assumed: `sha256sum` of all 4 uploaded test
+images matched their stored copies exactly, byte-for-byte, after a full
+session of deskewing, rotating, cropping, adjusting, reordering, and
+composing them into a final PDF.
+
+### Imagick — confirmed real, not just "present"
+
+`class_exists('Imagick')` was verified `true` specifically on
+`/usr/bin/php8.3` — the exact binary this project's `artisan serve`/
+`queue:work` processes actually run — not merely inferred from a `php -m`
+grep, since this box also has a separate XAMPP-bundled PHP (`/opt/lampp/bin/php`,
+PHP 8.2) with only GD, no Imagick. `(new Imagick())->getVersion()`
+confirmed real ImageMagick 6.9.12 backing it. This is what makes
+`deskewImage()`, `despeckleImage()`, `sharpenImage()`, and
+`brightnessContrastImage()` real, purpose-built operations rather than
+hand-rolled GD approximations — no GD fallback layer was built for an
+environment this deployment doesn't have; `ScanImageProcessor`'s
+constructor throws a clear, honest error if `Imagick` is ever unavailable
+rather than silently degrading.
+
+Two real extension-API gotchas hit and fixed during this phase's own
+testing (both would have been silent guesses without directly verifying
+against `ReflectionClass`/a real script, not just documentation that may
+not match this exact installed version):
+- The method is `autoOrient()`, not `autoOrientImage()`, on this Imagick
+  extension version (3.7.0) — confirmed via `ReflectionClass`.
+- `getQuantumRange()` returns `{quantumRangeLong, quantumRangeString}`
+  (65535 for this Q16 build) and is genuinely `static` — confirmed via
+  `ReflectionMethod::isStatic()` before writing `Imagick::getQuantumRange()`
+  as a static call.
+
+### `ScanImageProcessor` — real, verified image quality operations
+
+Pipeline order: EXIF auto-orient → discrete rotate → deskew → crop →
+brightness/contrast → sharpen → noise reduction → background cleanup.
+Deskew threshold (`0.4 * quantumRangeLong`) and blank-page thresholds
+(grayscale mean fraction > 0.92, stddev fraction < 0.05) were tuned and
+verified against real synthetic test images generated for this phase, not
+guessed: a deliberately 8°-skewed test page came out with genuinely
+horizontal lines after deskew (rendered and visually compared); a
+realistic low-quality scan (faint off-white tint, subtle grain noise, low-
+contrast gray text) came out with a genuinely clean white background and
+sharp dark text after contrast/sharpen/noise-reduction/background-cleanup
+(an earlier, harsher synthetic noise test — full-random-pixel corruption
+over a stark uniform-gray background — correctly showed these operations
+doing little, which is honest: no real scanner produces that kind of
+noise, and the parameters are tuned for real scan quality, not an
+adversarial synthetic worst case). Blank-page detection correctly flagged
+only the one genuinely-blank test image out of four, including one that
+was merely low-contrast/noisy (not blank) — confirming the threshold
+doesn't over-fire on merely poor-quality-but-real content.
+
+### `ScanSessionService` / `ImagesToPdfService`
+
+Mirrors Phase 4/5's service shape: real content-sniff via `finfo` (reusing
+the exact validation approach `DocumentController::store()`/
+`ImageNormalizationService` already use) rather than trusting client
+MIME/extension; `reorderImages()` validates the given order is exactly the
+current image-id set (same idea as Phase 3's permutation validation);
+`removeImage()` is a real hard delete — deliberately distinct from
+`excluded` (a soft params flag that keeps the file, just skips it at
+Create PDF) — since removal is an explicit "drop this from the batch
+entirely" user action, not a case "don't destroy" governs.
+`ImagesToPdfService` composes the final PDF with plain `FPDF` (no FPDI —
+there's no existing PDF being imported into, unlike Phase 4/5's engines),
+one `AddPage()` + `Image()` per processed image at an assumed 150 DPI.
+
+One small, genuine reuse: `Document::toSummaryArray()` — extracted from
+`DocumentController`'s private `serializeDocument()` once
+`ScanSessionController`'s `createPdf()` needed the identical response
+shape for a freshly-created document, rather than a second, divergent
+copy; `DocumentController` now delegates to it.
+
+### API
+
+Five routes under `/api/scan-sessions...`, `auth:sanctum`, a `ScanSession`
+addressed by UUID (same convention as `Document`) not its internal id:
+`POST /scan-sessions`, `GET /scan-sessions/{id}`,
+`POST /scan-sessions/{id}/images` (multipart, multiple), `PATCH
+.../images/{imageId}`, `POST .../reorder`, `DELETE .../images/{imageId}`,
+`GET .../images/{imageId}/preview` (renders the image's CURRENT processed
+state on demand — real bytes returned synchronously, not a job), `POST
+.../create-pdf` → `{document: <DocumentSummary>}`.
+
+### Verified working (2026-09-17)
+
+Against the live `php artisan serve` + `queue:work` stack, `curl` with a
+real Sanctum session, using 4 real generated test images (normal, an
+8°-skewed version of it, a genuinely blank page, and a realistic low-
+quality scan) — checked via `qpdf --check`, `pdftoppm` render + visual
+comparison, `pdfinfo`, direct `sha256sum`/DB inspection, never the API's
+JSON response alone: all four uploads correctly dimensioned and blank-
+detected (only the blank one flagged); deskew/rotate/crop/contrast/
+sharpen/noise-reduction/background-cleanup each visibly correct in the
+live preview endpoint; reorder correctly changed final page order;
+exclude correctly dropped a page from the output without deleting its
+source; the final composed PDF (`qpdf --check` clean) contained the
+correct 3 (of 4) pages in the chosen order with every cleanup operation
+visibly baked in exactly as configured; the resulting `Document` reached
+real `status: "ready"` with `page_count: 3` through the unmodified Phase 2
+ingest pipeline; every source image's `sha256sum` matched its pristine
+upload exactly after the full session; and clear `422`s (with no orphan
+rows) for a non-image upload, an invalid rotation value, an invalid
+reorder, a nonexistent image id, and an empty (all-excluded) create-pdf
+attempt.
+
+### What Phase 6 (backend) does NOT include
+
+The frontend (delivered in the same session — see below). Real physical-
+scanner (TWAIN/SANE) integration — `addImages()` is the only way images
+enter a session today; a future phase could add a second source alongside
+it without restructuring REVIEW/CLEAN/REORDER/CREATE, but nothing here
+implies or claims scanner hardware support that doesn't exist. No OCR,
+conversion, compression, signing, AI, or forms.
+
+## Phase 6 (frontend) — real scan/image-import UI (2026-09-17)
+
+Wires CONVERT's "Create PDF from Images" command to a new, deliberately
+independent workflow (`frontend/src/scanning/`) — independent of
+`useWorkingDocument`/`useOpenDocument` state, since this always creates a
+brand-new document regardless of whatever is (or isn't) currently open,
+the same way Merge/Split already work. Verified reachable and fully
+functional with **zero document open** — the first ribbon-driven workflow
+in the app that doesn't require one.
+
+### One cohesive screen, not five rigid wizard pages
+
+`CreatePdfFromImagesDialog` (a new, larger `Dialog` size — `size="lg"`, a
+small addition to the shared `Dialog` primitive since every prior dialog
+was a compact single-purpose box) combines IMPORT (a drop zone),
+REVIEW+REORDER (a draggable thumbnail strip reusing Phase 3's exact
+`ThumbnailPanel` drag-and-drop technique, generalized from page numbers to
+image ids), and CLEAN (`ScanImageEditorPanel`, showing the selected
+image's real live processed preview with a crop-box drag overlay plus
+rotate/deskew/brightness/contrast/sharpen/noise-reduction/background-
+cleanup controls) into one screen, then CREATE PDF as a footer action —
+matching how real scan-to-PDF utilities are usually built, while still
+delivering every capability the brief lists. "Save" is implicit: the
+created document's version 1 *is* the saved result, exactly like any
+fresh upload — confirmed by opening straight into the fully-`ready`
+editor with no separate save step.
+
+Crop coordinates here are deliberately **top-left-origin pixels** (the
+processed preview's own natural pixel space, standard raster-image
+convention, matching Imagick's own `cropImage()` contract) — NOT the
+bottom-left PDF-point convention Phase 3/4/5's crop/object endpoints use.
+Copying `CropDialog`'s Y-flip math here would have been a real, silent
+bug; this is called out explicitly in both `lib/api.ts`'s
+`ScanImageCrop` docblock and `ScanImageEditorPanel`'s own, specifically so
+a future reader doesn't reach for that precedent by reflex.
+
+### A real UX bug found and fixed during this phase's own testing
+
+Every control in `ScanImageEditorPanel` is a controlled input bound
+directly to `image.params` — a prop that only actually updates once its
+`PATCH` round-trip resolves. Playwright's `.check()` on the deskew
+checkbox failed with "did not change its state": React's own re-render
+(synchronous, on the same click, before the network response lands) was
+snapping the checkbox straight back to unchecked for the duration of the
+request — a real, visible flicker-back a human user would just as
+reasonably read as "my click didn't register," not merely a test-timing
+artifact. Fixed with an optimistic local-state overlay (`localParams`,
+reset only when the *selected image* changes, merged on top of
+`image.params` for every control's displayed value) — the same
+local-buffer-then-reconcile shape Phase 4/5's `TextObjectPanel` already
+used for its own slower-committing fields, applied here to instant
+toggles/sliders instead of blur-committed text.
+
+### Testing
+
+Same technique as every prior phase: Playwright against
+`google-chrome-stable`, driven against the real live stack. Verified
+end-to-end, screenshot-confirmed: the command is reachable and the dialog
+opens with **no document currently open**; importing 4 real test images;
+selecting the skewed one and enabling deskew (live preview genuinely
+straightens); selecting the realistic-scan one and applying contrast/
+sharpen/noise-reduction/background-cleanup (live preview genuinely
+cleans up); excluding the detected-blank one (the footer's page count
+correctly dropped from 4 to 3); clicking Create PDF and — critically —
+landing in the fully-open, fully-`ready` main editor showing the real
+combined 3-page PDF, pages in the correct order, every cleanup operation
+visibly present, with the ORGANIZE/EDIT/ANNOTATE tabs now all reachable
+exactly as they would be for any normally-opened document. Zero console
+errors across the entire flow. Reorder was verified directly at the API
+level (a real permutation applied correctly, confirmed via the final
+composed PDF's actual page order in an earlier test); the UI drag
+interaction itself reuses Phase 3's exact, already-proven
+`ThumbnailPanel` technique rather than a new one, so a dedicated second
+UI-level drag test was not run separately in this session — noted
+honestly rather than left implied.
+
+### What Phase 6 (frontend) does NOT include
+
+Real physical-scanner integration (see the backend's honest scope
+boundary — no "Scan from device" UI exists). A dedicated UI-level drag-
+reorder test in this session specifically (see above — the underlying
+mechanism is Phase 3's own proven one, exercised directly via the API
+instead). No OCR, conversion, compression, signing, AI, or forms.

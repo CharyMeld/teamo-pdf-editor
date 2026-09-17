@@ -8,6 +8,7 @@ import { OpenDocumentProvider } from "../hooks/useOpenDocument";
 import { PageSelectionProvider } from "../hooks/usePageSelection";
 import { PanelVisibilityProvider } from "../hooks/usePanelVisibility";
 import { WorkingDocumentProvider } from "../hooks/useWorkingDocument";
+import { ScanWorkflowProvider } from "../scanning/useScanWorkflow";
 
 /** Composes the workspace's shared state providers in one place so
  * WorkspacePage doesn't accumulate a growing pyramid of wrappers as more
@@ -21,21 +22,27 @@ import { WorkingDocumentProvider } from "../hooks/useWorkingDocument";
 export default function WorkspaceProviders({ children }: { children: ReactNode }) {
   return (
     <ActiveTabProvider>
-      <SelectionProvider>
-        <DocumentViewProvider>
-          <OpenDocumentProvider>
-            <WorkingDocumentProvider>
-              <ContentObjectsProvider>
-                <AnnotationsProvider>
-                  <PageSelectionProvider>
-                    <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
-                  </PageSelectionProvider>
-                </AnnotationsProvider>
-              </ContentObjectsProvider>
-            </WorkingDocumentProvider>
-          </OpenDocumentProvider>
-        </DocumentViewProvider>
-      </SelectionProvider>
+      {/* No dependency on any other provider here (Phase 6's scan/import
+          workflow creates a brand-new document, independent of whatever is
+          currently open) — placement outside the rest is arbitrary, not
+          load-bearing. */}
+      <ScanWorkflowProvider>
+        <SelectionProvider>
+          <DocumentViewProvider>
+            <OpenDocumentProvider>
+              <WorkingDocumentProvider>
+                <ContentObjectsProvider>
+                  <AnnotationsProvider>
+                    <PageSelectionProvider>
+                      <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                    </PageSelectionProvider>
+                  </AnnotationsProvider>
+                </ContentObjectsProvider>
+              </WorkingDocumentProvider>
+            </OpenDocumentProvider>
+          </DocumentViewProvider>
+        </SelectionProvider>
+      </ScanWorkflowProvider>
     </ActiveTabProvider>
   );
 }

@@ -686,3 +686,89 @@ export function duplicateAnnotation(id: string, annotationId: string): Promise<A
     .post<AnnotationOperationResult>(`/documents/${id}/annotations/${annotationId}/duplicate`)
     .then((r) => r.data);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 6 — SCAN: the scanning/image-import workflow (Create PDF from
+// Images). A `ScanSession` exists independently of any `Document` until
+// `createScanPdf()` returns one — see ARCHITECTURE.md's Phase 6 section.
+// Crop coordinates here are TOP-LEFT-origin pixel coordinates (standard
+// raster-image convention, matching Imagick's own `cropImage()` contract),
+// deliberately NOT the bottom-left PDF-point convention Phase 3/4/5's crop/
+// object endpoints use — there's no PDF page involved yet at this stage.
+
+export interface ScanImageCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ScanImageParams {
+  rotationDegrees: 0 | 90 | 180 | 270 | -90;
+  deskew: boolean;
+  crop: ScanImageCrop | null;
+  brightness: number; // -100..100
+  contrast: number; // -100..100
+  sharpen: number; // 0..100
+  noiseReduction: number; // 0..100
+  backgroundCleanup: boolean;
+  excluded: boolean;
+}
+
+export interface ScanSessionImage {
+  id: number;
+  position: number;
+  filename: string;
+  widthPx: number;
+  heightPx: number;
+  params: ScanImageParams;
+  blankPageDetected: boolean;
+}
+
+export async function createScanSession(): Promise<string> {
+  const { data } = await api.post<{ id: string }>("/scan-sessions");
+  return data.id;
+}
+
+export async function getScanSession(sessionId: string): Promise<ScanSessionImage[]> {
+  const { data } = await api.get<{ data: ScanSessionImage[] }>(`/scan-sessions/${sessionId}`);
+  return data.data;
+}
+
+export async function addScanImages(sessionId: string, files: File[]): Promise<ScanSessionImage[]> {
+  const form = new FormData();
+  files.forEach((file) => form.append("images[]", file));
+  const { data } = await api.post<{ data: ScanSessionImage[] }>(`/scan-sessions/${sessionId}/images`, form);
+  return data.data;
+}
+
+export type PatchScanImageInput = Partial<ScanImageParams>;
+
+export async function patchScanImage(
+  sessionId: string,
+  imageId: number,
+  patch: PatchScanImageInput,
+): Promise<ScanSessionImage> {
+  const { data } = await api.patch<{ data: ScanSessionImage }>(`/scan-sessions/${sessionId}/images/${imageId}`, patch);
+  return data.data;
+}
+
+export async function reorderScanImages(sessionId: string, imageIds: number[]): Promise<ScanSessionImage[]> {
+  const { data } = await api.post<{ data: ScanSessionImage[] }>(`/scan-sessions/${sessionId}/reorder`, { imageIds });
+  return data.data;
+}
+
+export async function removeScanImage(sessionId: string, imageId: number): Promise<void> {
+  await api.delete(`/scan-sessions/${sessionId}/images/${imageId}`);
+}
+
+/** Returns an object URL for the image's CURRENT processed preview — caller must `URL.revokeObjectURL()` it when done. */
+export async function getScanImagePreviewUrl(sessionId: string, imageId: number): Promise<string> {
+  const { data } = await api.get(`/scan-sessions/${sessionId}/images/${imageId}/preview`, { responseType: "blob" });
+  return URL.createObjectURL(data as Blob);
+}
+
+export async function createScanPdf(sessionId: string, title: string): Promise<DocumentSummary> {
+  const { data } = await api.post<{ document: DocumentSummary }>(`/scan-sessions/${sessionId}/create-pdf`, { title });
+  return data.document;
+}

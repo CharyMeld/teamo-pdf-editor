@@ -6,14 +6,24 @@ interface DialogProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** "md" (default, `max-w-md`) fits every existing single-field/preview
+   * dialog. "lg" (`max-w-5xl`) is for a genuinely content-heavy workflow —
+   * added for Phase 6's multi-image scan/clean/reorder wizard, the first
+   * dialog that doesn't fit in a compact single-purpose box. */
+  size?: "md" | "lg";
 }
+
+const SIZE_CLASSES: Record<"md" | "lg", string> = {
+  md: "max-w-md",
+  lg: "max-w-5xl",
+};
 
 /** Real modal dialog primitive: role="dialog"/aria-modal, a focus trap
  * (Tab cycles within it, Escape closes and returns focus to whatever
  * opened it), and click-outside-to-close. Both the Open-document dialog
  * and the password-unlock prompt render through this instead of one-off
  * markup. */
-export default function Dialog({ open, onClose, title, children }: DialogProps) {
+export default function Dialog({ open, onClose, title, children, size = "md" }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -69,7 +79,7 @@ export default function Dialog({ open, onClose, title, children }: DialogProps) 
         aria-modal="true"
         aria-labelledby={titleId}
         onMouseDown={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-lg"
+        className={`max-h-[85vh] w-full ${SIZE_CLASSES[size]} overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-lg`}
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id={titleId} className="text-sm font-semibold text-text">

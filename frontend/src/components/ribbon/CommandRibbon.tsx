@@ -8,6 +8,7 @@ import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useWorkingDocument } from "../../hooks/useWorkingDocument";
+import { useScanWorkflow } from "../../scanning/useScanWorkflow";
 import IconButton from "../ui/IconButton";
 import CommandGroup from "./CommandGroup";
 import CommandTabs from "./CommandTabs";
@@ -57,6 +58,7 @@ export default function CommandRibbon() {
   const organize = useOrganizeRunHandlers();
   const contentEditor = useContentEditorRunHandlers();
   const annotations = useAnnotationRunHandlers();
+  const scanWorkflow = useScanWorkflow();
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const [sheetOpen, setSheetOpen] = useState(false);
   useUndoRedoShortcuts();
@@ -75,6 +77,7 @@ export default function CommandRibbon() {
     "view.nextPage": view.goToNextPage,
     "view.prevPage": view.goToPrevPage,
     "home.open": showOpenDialog,
+    "convert.fromImage": scanWorkflow.openDialog,
     ...organize.runHandlers,
     ...contentEditor.runHandlers,
     ...annotations.runHandlers,
