@@ -480,3 +480,209 @@ export function duplicateContentObject(id: string, objectId: string): Promise<Co
     .post<ContentOperationResult>(`/documents/${id}/content/objects/${objectId}/duplicate`)
     .then((r) => r.data);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 — ANNOTATE: real annotation operations against the backend's
+// PdfAnnotationEngine (see ARCHITECTURE.md's Phase 5 section). A parallel,
+// independent chain from Phase 4's content objects — shares the exact same
+// OperationResult envelope (plus `annotationId`) and the same
+// undo/redo/Save machinery, no separate state model needed here either.
+
+export type AnnotationType =
+  | "highlight"
+  | "underline"
+  | "strikethrough"
+  | "freehand"
+  | "rectangle"
+  | "circle"
+  | "arrow"
+  | "text_box"
+  | "sticky_note"
+  | "stamp";
+
+export interface MarkAnnotationParams {
+  color: string;
+  opacity?: number; // highlight only
+  thickness?: number; // underline/strikethrough only
+}
+
+export interface ShapeAnnotationParams {
+  strokeColor: string;
+  strokeWidth: number;
+  fillColor?: string;
+  fillOpacity?: number;
+}
+
+export interface FreehandPoint {
+  x: number;
+  y: number;
+}
+
+export interface FreehandAnnotationParams {
+  points: FreehandPoint[];
+  color: string;
+  thickness: number;
+}
+
+export interface ArrowAnnotationParams {
+  color: string;
+  thickness: number;
+}
+
+export interface TextBoxAnnotationParams {
+  text: string;
+  font: "Helvetica" | "Times" | "Courier";
+  fontSize: number;
+  bold: boolean;
+  italic: boolean;
+  color: string;
+  align: TextAlign;
+  lineSpacing: number;
+  backgroundColor?: string;
+  borderColor?: string;
+}
+
+export interface StickyNoteAnnotationParams {
+  note: string;
+  color: string;
+}
+
+export interface StampAnnotationParams {
+  stampKind: "preset" | "image";
+  presetKey?: string;
+  storagePath?: string;
+  originalFilename?: string;
+}
+
+export type AnnotationParams =
+  | MarkAnnotationParams
+  | ShapeAnnotationParams
+  | FreehandAnnotationParams
+  | ArrowAnnotationParams
+  | TextBoxAnnotationParams
+  | StickyNoteAnnotationParams
+  | StampAnnotationParams;
+
+export interface Annotation {
+  annotationId: string;
+  type: AnnotationType;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  /** Arrow only: the literal tail (x,y) -> head (x2,y2) points; x/y/width/height are still the derived bounding box every other type's selection handles rely on. */
+  x2?: number;
+  y2?: number;
+  params: AnnotationParams;
+}
+
+export interface StampPreset {
+  label: string;
+  color: string;
+}
+
+export interface AnnotationsResponse {
+  annotations: Annotation[];
+  stampPresets: Record<string, StampPreset>;
+}
+
+export interface AnnotationOperationResult extends OperationResult {
+  annotationId: string;
+}
+
+export async function getAnnotations(id: string, page?: number): Promise<AnnotationsResponse> {
+  const { data } = await api.get<{ data: Annotation[]; stampPresets: Record<string, StampPreset> }>(
+    `/documents/${id}/annotations`,
+    { params: page ? { page } : undefined },
+  );
+  return { annotations: data.data, stampPresets: data.stampPresets };
+}
+
+export interface CreateAnnotationInput {
+  type: AnnotationType;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  x2?: number;
+  y2?: number;
+  params: Record<string, unknown>;
+  /** stamp (stampKind: "image") only. */
+  file?: File;
+}
+
+/**
+ * One generic creator rather than Phase 4's one-function-per-type style —
+ * with 10 annotation types (vs Phase 4's 3), a `createHighlight`/
+ * `createUnderline`/... per type would be pure boilerplate; every type
+ * shares the exact same request shape (a discriminated `type` plus
+ * `params`), so a single function taking that union is a deliberate,
+ * justified deviation from Phase 4's own precedent, not an inconsistency.
+ */
+export function createAnnotation(id: string, input: CreateAnnotationInput): Promise<AnnotationOperationResult> {
+  if (input.file) {
+    const form = new FormData();
+    form.append("type", input.type);
+    form.append("page", String(input.page));
+    form.append("x", String(input.x));
+    form.append("y", String(input.y));
+    form.append("width", String(input.width));
+    form.append("height", String(input.height));
+    if (input.rotation !== undefined) form.append("rotation", String(input.rotation));
+    Object.entries(input.params).forEach(([key, value]) => form.append(`params[${key}]`, String(value)));
+    form.append("file", input.file);
+    return api.post<AnnotationOperationResult>(`/documents/${id}/annotations`, form).then((r) => r.data);
+  }
+
+  return api
+    .post<AnnotationOperationResult>(`/documents/${id}/annotations`, {
+      type: input.type,
+      page: input.page,
+      x: input.x,
+      y: input.y,
+      width: input.width,
+      height: input.height,
+      rotation: input.rotation,
+      x2: input.x2,
+      y2: input.y2,
+      params: input.params,
+    })
+    .then((r) => r.data);
+}
+
+export type PatchAnnotationInput = Partial<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  x2: number;
+  y2: number;
+  params: Record<string, unknown>;
+}>;
+
+export function patchAnnotation(
+  id: string,
+  annotationId: string,
+  patch: PatchAnnotationInput,
+): Promise<AnnotationOperationResult> {
+  return api
+    .patch<AnnotationOperationResult>(`/documents/${id}/annotations/${annotationId}`, patch)
+    .then((r) => r.data);
+}
+
+export function deleteAnnotation(id: string, annotationId: string): Promise<AnnotationOperationResult> {
+  return api.delete<AnnotationOperationResult>(`/documents/${id}/annotations/${annotationId}`).then((r) => r.data);
+}
+
+export function duplicateAnnotation(id: string, annotationId: string): Promise<AnnotationOperationResult> {
+  return api
+    .post<AnnotationOperationResult>(`/documents/${id}/annotations/${annotationId}/duplicate`)
+    .then((r) => r.data);
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSelectionContext } from "../../commands/useSelectionContext";
 import { useActiveTab } from "../../hooks/useActiveTab";
+import { useAnnotationRunHandlers } from "../../hooks/useAnnotationRunHandlers";
 import { useContentEditorRunHandlers } from "../../hooks/useContentEditorRunHandlers";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
@@ -55,6 +56,7 @@ export default function CommandRibbon() {
   const { showOpenDialog } = useOpenDocument();
   const organize = useOrganizeRunHandlers();
   const contentEditor = useContentEditorRunHandlers();
+  const annotations = useAnnotationRunHandlers();
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const [sheetOpen, setSheetOpen] = useState(false);
   useUndoRedoShortcuts();
@@ -75,12 +77,14 @@ export default function CommandRibbon() {
     "home.open": showOpenDialog,
     ...organize.runHandlers,
     ...contentEditor.runHandlers,
+    ...annotations.runHandlers,
   };
   const disabledReasons: Record<string, string> = {
     ...(view.canGoNext ? {} : { "view.nextPage": "No document open" }),
     ...(view.canGoPrev ? {} : { "view.prevPage": "No document open" }),
     ...organize.disabledReasons,
     ...contentEditor.disabledReasons,
+    ...annotations.disabledReasons,
   };
 
   return (

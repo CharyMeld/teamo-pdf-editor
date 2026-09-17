@@ -38,7 +38,16 @@ export type IconName =
   | "alignCenter"
   | "alignRight"
   | "image"
-  | "text";
+  | "text"
+  | "highlight"
+  | "underline"
+  | "strikethrough"
+  | "pen"
+  | "rectangle"
+  | "circle"
+  | "arrow"
+  | "stickyNote"
+  | "stamp";
 
 interface IconProps {
   name: IconName;
@@ -85,6 +94,15 @@ const PATHS: Record<IconName, string> = {
   alignRight: "M4 6h16M10 12h10M6 18h14",
   image: "M4 5h16v14H4V5Zm3 10 3.5-4 3 3.5L16 11l4 8M8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z",
   text: "M5 5h14M12 5v14M9 19h6",
+  highlight: "M3 21l1-5 12-12 4 4-12 12-5 1Z M15 5l4 4",
+  underline: "M6 4v7a6 6 0 0 0 12 0V4M4 21h16",
+  strikethrough: "M7 6c2-2 8-2 10 0M7 18c2 2 8 2 10 0M4 12h16",
+  pen: "M4 20l4-1 10-10-3-3-10 10-1 4Z M14 7l3 3",
+  rectangle: "M4 5h16v14H4V5Z",
+  circle: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+  arrow: "M5 19 19 5M19 5h-6M19 5v6",
+  stickyNote: "M4 4h12l4 4v12H4V4Z M16 4v4h4",
+  stamp: "M12 3l2 4 4 .5-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.5 2-4Z M8 21l4-3 4 3",
 };
 
 export default function Icon({ name, className, size = 16 }: IconProps) {

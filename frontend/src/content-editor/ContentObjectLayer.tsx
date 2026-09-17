@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { ContentBox, ContentObject, TextObjectParams } from "../lib/api";
 import Icon from "../components/ui/Icon";
+import { useActiveTab } from "../hooks/useActiveTab";
 import { DEFAULT_TEXT_PARAMS, useContentObjects } from "./useContentObjects";
 import TextComposerPopover from "./TextComposerPopover";
 
@@ -55,6 +56,17 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
     patchSelected,
     busy,
   } = useContentObjects();
+  // Phase 5 mounts AnnotationLayer as a second full-page overlay alongside
+  // this one (see PdfViewer) — CSS hit-testing ignores visual transparency,
+  // so whichever layer is later in the DOM would otherwise swallow every
+  // background click meant for the other, regardless of which tool the
+  // user actually has armed. Gating each layer's OWN background by the
+  // active ribbon tab (while every individual object's own wrapper div
+  // below keeps `pointer-events-auto` unconditionally, so existing objects
+  // stay clickable/selectable from either tab) resolves this with no
+  // z-index/DOM-order dependency.
+  const { activeTab } = useActiveTab();
+  const isActiveLayer = activeTab === "EDIT";
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -244,7 +256,7 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
   return (
     <div
       ref={containerRef}
-      className={`absolute inset-0 select-none touch-none ${cursorClass}`}
+      className={`absolute inset-0 select-none touch-none ${cursorClass} ${isActiveLayer ? "" : "pointer-events-none"}`}
       onPointerDown={handleBackgroundPointerDown}
       onPointerMove={handleBackgroundPointerMove}
       onPointerUp={(e) => void handleBackgroundPointerUp(e)}
@@ -267,7 +279,7 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
             data-content-object
             onPointerDown={startObjectDrag("move", obj)}
             className={[
-              "absolute cursor-move overflow-hidden",
+              "absolute cursor-move overflow-hidden pointer-events-auto",
               isSelected ? "ring-2 ring-accent" : "ring-1 ring-transparent hover:ring-border-strong",
             ].join(" ")}
             style={{

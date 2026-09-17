@@ -2,12 +2,11 @@ import { useSelectionContext } from "../../commands/useSelectionContext";
 import { usePanelVisibility } from "../../hooks/usePanelVisibility";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import IconButton from "../ui/IconButton";
-import DevSelectionSimulator from "./DevSelectionSimulator";
+import AnnotationPanel from "./panels/AnnotationPanel";
 import DocumentPanel from "./panels/DocumentPanel";
 import ImageObjectPanel from "./panels/ImageObjectPanel";
 import PagePanel from "./panels/PagePanel";
 import PropertiesPanel from "./panels/PropertiesPanel";
-import SelectionPanel from "./panels/SelectionPanel";
 import TextObjectPanel from "./panels/TextObjectPanel";
 
 function InspectorBody() {
@@ -15,12 +14,11 @@ function InspectorBody() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-surface-muted">
-      <DevSelectionSimulator />
       {selection === "none" && <DocumentPanel />}
       {selection === "page" && <PagePanel />}
       {selection === "text" && <TextObjectPanel />}
       {selection === "image" && <ImageObjectPanel />}
-      {selection === "annotation" && <SelectionPanel kind={selection} />}
+      {selection === "annotation" && <AnnotationPanel />}
       <PropertiesPanel />
     </div>
   );

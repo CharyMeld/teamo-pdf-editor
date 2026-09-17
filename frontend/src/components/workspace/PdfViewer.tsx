@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import AnnotationLayer from "../../annotations/AnnotationLayer";
 import ContentObjectLayer from "../../content-editor/ContentObjectLayer";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
@@ -271,6 +272,15 @@ export default function PdfViewer() {
                   heightPt={entry.heightPt}
                   scale={scale}
                 />
+              )}
+              {/* Phase 5's annotation overlay — same current-page-only
+                  scoping as ContentObjectLayer above (useAnnotations
+                  fetches only the current page too), and see
+                  ContentObjectLayer's own comment for why only one of the
+                  two layers is ever "live" for background clicks at a
+                  time. */}
+              {isVisible && !hasError && entry.pageNumber === view.currentPage && (
+                <AnnotationLayer pageNumber={entry.pageNumber} heightPt={entry.heightPt} scale={scale} />
               )}
               <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-text-subtle">
                 {entry.pageNumber}
