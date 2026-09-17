@@ -1371,3 +1371,291 @@ fully solve the general case.
 Annotations (Phase 5) — `SelectionPanel`/`CONTEXTUAL_COMMANDS.annotation`
 remain the Phase 1 stub. No backend changes. No fix for the popover
 below-the-fold edge case beyond the mitigation noted above.
+
+## Phase 5 (backend) — real PDF annotation engine (2026-09-17)
+
+ANNOTATE's 10 commands — Highlight, Underline, Strikethrough, Freehand
+drawing, Rectangle, Circle, Arrow, Text box, Sticky note, Stamp — are now
+real, drawn via a new `PdfAnnotationEngine`/`AnnotationService`, a parallel,
+independent sibling to Phase 4's `PdfContentEngine`/`ContentObjectService`.
+**Zero schema changes, zero changes to Phase 3/4 behavior** — this reuses
+`WorkingCopyManager` exactly as Phase 4 does, with its own second,
+independent chain distinguished only by an `annotation_*` vs `content_*`
+`operation_type` prefix.
+
+### Interleaving semantics — Phase 4's own rule, applied a second time
+
+`AnnotationService::currentChainState()` checks
+`str_starts_with($currentStep->operation_type, 'annotation_')` — the exact
+same "is the current step my own kind, or is it clean (built on top of
+by-someone-else's-manipulation), so anything from my own type before it is
+now flattened" rule `ContentObjectService` already established. No new
+concept, no code in either service references the other's existence. A
+content edit followed by an annotation edit starts a fresh, empty
+annotation chain (correct — none exist yet); symmetrically, an annotation
+edit followed by a further content edit flattens any content objects
+present (their pixels remain, baked in by the annotation step's own
+recomposition, but they stop being independently selectable) — verified by
+direct payload inspection after a real content→annotation→content sequence
+(`sourceStepId` correctly pointed at the other chain's tip step each time,
+`contentObjects`/`annotations` each correctly restarted empty), not assumed
+from the code alone.
+
+### New drawing primitives (`AnnotatingFpdi extends RotatingFpdi`)
+
+Grepping the installed `setasign/fpdf` 1.9.0 source confirmed it provides
+only `Line()` and `Rect()` natively — no `Polygon`/`Ellipse`/`Circle`/
+`Curve`. Two new primitives, hand-rolled the same way `RotatingFpdi`
+already hand-rolled `Rotate()` (raw `_out()` content-stream operators):
+
+- **`drawPolyline()`** — a raw `m`/`l`/`h` path, taking points directly in
+  our app's own bottom-left-origin convention (multiplied only by `$this->k`,
+  no top-left flip — that convention already matches the PDF content
+  stream's native coordinate space; `Line()`/`Rect()`'s flip exists only to
+  convert FROM their top-left-facing public API TO that same native space).
+  Serves freehand (open stroke), circle/ellipse (a 48-point polygon
+  approximation — chosen over hand-rolled Bézier operators as the lower-
+  risk, visually indistinguishable option at annotation sizes, confirmed by
+  real render), and the arrow's filled triangular head.
+- **`SetAlpha()`** — real alpha transparency, needed only by "highlight"
+  (FPDI's imported page template draws first, everything else layers on
+  top in call order, so a highlight can only visually sit "behind" text via
+  partial opacity, never z-order). FPDF has no built-in alpha; this adds
+  the standard, widely-published `/ExtGState` recipe — verified against
+  this exact installed version's `_putresourcedict()`/`_putresources()`/
+  `_newobj()` implementations (`vendor/setasign/fpdf/fpdf.php`) before
+  writing it, rather than copied blind from a recipe written against a
+  possibly-different version. **This was the single highest-risk item in
+  the whole phase** (subtlety around resource-object numbering) — verified
+  first, before building anything else on it: created a highlight over
+  known real text, rendered, and visually confirmed the text stayed fully
+  legible *through* a visibly tinted rectangle. Worked correctly on the
+  first attempt.
+
+### Honest scope boundaries (see `PdfAnnotationEngine`'s docblock for the full detail)
+
+- **Sticky note**: draws a real, visible folded-corner marker glyph, but
+  the comment text itself is deliberately never rendered onto the page — a
+  static PDF has no built-in "hover popup" the way a real `/Annot` Text
+  dictionary gets in a generic viewer. The note text is stored and only
+  ever shown/edited in TeamO's own Smart Inspector — the same honest
+  boundary Phase 4 drew around "edit text," not a missing feature.
+- **Stamp**: `stampKind: "image"` is a TRUE embedded image (reuses Phase
+  4's exact `Image()` technique); `stampKind: "preset"` is a real drawn
+  bordered box + bold text badge from a small fixed server-side catalog
+  (`PdfAnnotationEngine::STAMP_PRESETS` — approved/rejected/draft/
+  confidential), never a placeholder graphic.
+- **Arrow** skips the generic per-annotation `Rotate()` wrapping every
+  other type gets — its own two stored points (`x,y` tail → `x2,y2` head)
+  already fully determine its visual direction; a `rotation` field on top
+  would be redundant.
+
+### One small, justified refactor
+
+`ContentObjectService::storeImage()` (mime-sniff via `finfo`, GD re-encode
+to PNG) extracted into `ImageNormalizationService::store()` — both it and
+the new stamp image variant call the identical, proven, security-sensitive
+logic rather than a second divergent copy. Similarly, `DocumentContentController`
+and the new `DocumentAnnotationController`'s byte-identical
+`authorizeOwner`/`authorizeEditable` moved into a shared
+`AuthorizesDocumentAccess` trait. Both are genuine reuse of proven logic
+once a real second caller existed — not speculative abstraction ahead of
+one.
+
+### Data model and API
+
+Same envelope as Phase 4 (`{operationId, sequenceNumber, pageCount,
+thumbnailJobId, status, canUndo, canRedo}` + `annotationId`), five flat
+routes under `/api/documents/{uuid}/annotations[...]`, `auth:sanctum`, same
+style as Phase 4's five `/content/objects` routes. Per-annotation object:
+`{annotationId, type, page, x, y, width, height, rotation, zIndex, active,
+x2?, y2? (arrow only — the literal points; x/y/width/height are still the
+derived bounding box every type's selection handles rely on), params}`.
+`operation_type` values are generic (`annotation_create/update/delete/
+duplicate`) rather than one per annotation type — the specific type is
+already in the payload and in `AuditLogger`'s context array, so no
+information is lost by not 10x-ing the operation-type granularity Phase 4
+used for its 3 types.
+
+### A real bug found and fixed during this phase's own testing
+
+Laravel's `ConvertEmptyStringsToNull` middleware turns a deliberately valid
+empty `sticky_note.note` (the comment can be added later, via the Smart
+Inspector) into `null` before validation ever runs — a plain
+`sometimes|string` rule only skips a genuinely *absent* key, so a
+present-but-null value still failed the `string` check with a real `422`,
+reproduced via the actual frontend flow (armed "Sticky Note", clicked the
+canvas) before being traced to its root cause and fixed by adding
+`nullable` to that one field's rule in
+`DocumentAnnotationController::validateAnnotationPayload()`. No other
+optional string field in the annotation payload shares this risk (every
+other optional color/preset/path field is either always given a real
+non-empty value by the frontend, or has its own `sometimes`-only ancestor
+object gating it).
+
+### Verified working (2026-09-17)
+
+Against the live `php artisan serve` + `queue:work` stack, `curl` with a
+real Sanctum cookie-jar session, checked via `qpdf --check`, `pdftoppm`
+render + visual pixel inspection, `pdftotext` (text_box/stamp preset),
+direct payload/DB inspection — never the API's JSON response alone:
+transparency (see above); all 10 types render correctly, distinctly, and
+simultaneously on one real page; move/rotate (`PATCH`) on a rectangle
+(recolored, rotated ~20°, repositioned) with the old state fully gone, no
+ghosting; delete + undo restoring a deleted circle; duplicate (+12pt
+offset) on an arrow producing two independently-editable copies with
+correct redo-branch pruning; the content↔annotation interleaving sequence
+described above; Save producing a `document_versions` row whose freshly
+re-read file (not the working step) contains every annotation and every
+Phase 4 content edit from the same session, with its stored
+`checksum_sha256` matching a fresh `sha256sum` and version 1's checksum
+unchanged; and clear `422`s (with no orphan `document_edit_operations`
+rows) for an invalid color, empty freehand points, a nonexistent
+`annotationId`, and an out-of-range page.
+
+### What Phase 5 (backend) does NOT include
+
+The frontend — no ANNOTATE ribbon wiring, no placement gestures, no
+selection handles (all planned for Phase 5's frontend half, delivered in
+the same session — see below). No real PDF `/Annot` dictionaries (sticky
+note, and every other type) — see the honest scope boundaries above. No
+OCR, conversion, compression, signing, AI, or forms.
+
+## Phase 5 (frontend) — real annotation UI (2026-09-17)
+
+Wires the ANNOTATE ribbon and Smart Inspector to Phase 5 (backend)'s
+annotation API above, in `frontend/src/annotations/` (a new sibling folder
+to `content-editor/`, since ANNOTATE is a distinct concept from EDIT).
+
+### Provider, canvas layering, and a real architectural conflict found and fixed
+
+`AnnotationsProvider` (`useAnnotations.tsx`) mirrors `useContentObjects.tsx`
+structurally, but bakes in from the start the two real bugs Phase 4's own
+frontend session found the hard way (see that section above and
+`[[content_editor_phase4_findings]]`): a `selfCausedRevisionRef` guard so a
+mutation's own `revision` bump doesn't wipe the selection it just made, and
+an explicit `knownType` argument to `selectAnnotation` so a just-created/
+duplicated annotation's type doesn't depend on a not-yet-refetched array.
+Verified this worked correctly from the very first real test (every one of
+the 10 types showed its correct, real Smart Inspector panel immediately
+after creation) — no repeat of Phase 4's own rediscovery.
+
+`AnnotationLayer` mounts as a **second** full-page overlay alongside
+`ContentObjectLayer` on the same per-page wrapper div. This surfaced a real
+conflict neither layer needed to consider alone: CSS pointer-event hit-
+testing ignores visual transparency, so whichever of two stacked full-page
+absolutely-positioned overlays is later in the DOM silently swallows every
+background click meant for the other, regardless of which tool the user
+actually has armed — discovered because Phase 4's own placement gestures
+stopped working the moment `AnnotationLayer` was mounted alongside it.
+Fixed by gating each layer's own root background with `pointer-events-none`
+whenever the active ribbon tab doesn't match it (EDIT for
+`ContentObjectLayer`, ANNOTATE for `AnnotationLayer`, both now read via
+`useActiveTab()`), while every individual object/annotation's own wrapper
+div keeps `pointer-events-auto` unconditionally (a `pointer-events: none`
+ancestor doesn't suppress a descendant that re-specifies `auto` — standard,
+well-supported CSS, not a hack) — so existing objects/annotations stay
+independently clickable/selectable from either tab, only the *background*
+placement/deselect behavior is tab-gated. This is the one place this
+phase's own work required touching a Phase 4 file, and is called out
+explicitly here rather than folded in quietly.
+
+### Placement interactions — one layer, four gesture shapes
+
+`AnnotationLayer` handles all 10 tools with four gesture patterns sharing
+one pointer-event pipeline: click-and-drag **box** placement (highlight/
+underline/strikethrough/rectangle/circle/text_box/stamp), click-and-drag
+**two-point** placement (arrow — its own tail/head, not a generic box),
+click-and-drag **path sampling** (freehand — every `pointermove` while
+down is appended to a points array, committed as one continuous stroke per
+gesture — a pen-lift is a new, independently selectable/deletable
+annotation, not a multi-stroke blob), and a **single click** (sticky
+note — commits immediately on pointerdown, no drag needed). Each
+annotation type renders its own small local `<svg>` sized to its own
+bounding box with a `viewBox` in raw PDF points (so stroke widths need no
+manual scale multiplication — the SVG's own viewport scaling handles it),
+except arrow, which — matching the backend's own choice not to wrap it in
+the generic rotation treatment — renders via its own page-absolute-
+positioned SVG line + polygon instead of a locally-scoped one. Live preview
+during a drag (the dashed placement box, the in-progress arrow line, the
+in-progress freehand polyline) is genuinely pixel-close to what the
+backend will actually draw, confirmed by comparing browser screenshots
+against the backend's own real `pdftoppm` renders of the same annotations
+side by side.
+
+For the two types that need one more piece of input before they can be
+created — **text_box** (real text content) and **stamp** (preset choice or
+image upload) — a small popover appears after the box is drawn
+(`AnnotationTextComposerPopover`, `StampChooserPopover`), the same
+"placement asks for what a sensible default can't cover, the rest is
+editable after" split Phase 4's `TextComposerPopover` established; every
+other type commits immediately with sensible defaults, restyled afterward
+via its real Smart Inspector panel.
+
+### Smart Inspector panels
+
+One dispatcher (`AnnotationPanel`, routing on `selectedAnnotation.type`)
+plus six focused category panels — `MarkupAnnotationPanel` (highlight/
+underline/strikethrough), `ShapeAnnotationPanel` (rectangle/circle),
+`LineAnnotationPanel` (freehand/arrow — both share a plain color+thickness
+shape), `TextBoxAnnotationPanel` (reuses Phase 4's exact `TextStyleFields`),
+`StickyNoteAnnotationPanel`, `StampAnnotationPanel` (mirrors Phase 4's
+`ImageObjectPanel` for the image variant, plus a preset grid for the
+preset variant). Replaces the Phase 1 dev-stub `SelectionPanel` for
+`selection: "annotation"` entirely — with no other type left needing it
+(Phase 4 already replaced its own `"text"`/`"image"` branches),
+`SelectionPanel.tsx` itself is now fully dead and was deleted rather than
+left as an unused stub. `DevSelectionSimulator` is gone too, for the same
+reason — every `SelectionType` now has real canvas-driven interaction,
+leaving it with nothing left to simulate.
+
+### Ribbon commands and a real UX bug found and fixed
+
+The 4 existing ANNOTATE stubs flip to `"available"`, 6 new ones added
+(`annotate.underline/strikethrough/rectangle/circle/arrow/textBox`), plus
+`context.annotation.delete` (`context.annotation.color` stays unavailable —
+redundant with the Smart Inspector's own real color controls, same
+precedent Phase 4 set for text/image; `.reply` stays unavailable — no
+comment-thread system exists). `useAnnotationRunHandlers.ts` mirrors
+`useContentEditorRunHandlers.ts`'s shape, merged into `CommandRibbon`
+alongside `organize`/`contentEditor`. Discovered while testing: the
+registry's original single `"Markup"` group held 7 commands, one more than
+`CommandGroup`'s desktop overflow cap of 6 — the 7th (Stamp) silently
+collapsed into a "More" dropdown a real user would have to know to look
+for. Split into three groups (`Markup`: highlight/underline/strikethrough/
+freehand; `Shapes`: rectangle/circle/arrow; `Text & Notes`: text box/sticky
+note/stamp) — a genuine UX improvement this testing surfaced, not just a
+workaround for the test script.
+
+### New icons
+
+Nine new hand-authored stroke icons added to `components/ui/Icon.tsx`
+(highlight, underline, strikethrough, pen, rectangle, circle, arrow,
+stickyNote, stamp) — none of the existing 33 fit any of these, confirmed
+before adding rather than assumed.
+
+### Testing
+
+Same technique as Phase 4's own frontend session: Playwright pointed at
+the system's `google-chrome-stable` (no `chromium-cli`/browser-download in
+this sandbox), driven against the real live stack. Verified end-to-end,
+screenshot-confirmed at each step: placing all 10 annotation types on one
+real page with correct contextual ribbon groups and correct Smart
+Inspector panels for each (not the old stub); dragging an existing
+annotation (a rectangle) to a genuinely new position with the old position
+fully gone; and — critically — a real Save → full page reload → reopen
+round trip with all 10 annotations still present and correctly rendered,
+screenshot-verified against the ANNOTATE tab after reopening, not just an
+`OperationResult` success claim. One incidental backend-adjacent bug (the
+sticky-note empty-string/`null` validation issue, see the backend section
+above) was found via this exact frontend flow, not a backend-only test —
+another point for testing through the real UI rather than the API alone.
+
+### What Phase 5 (frontend) does NOT include
+
+No true interactive PDF `/Annot` dictionaries (see the backend's honest
+scope boundaries). No individual-point editing for an existing freehand
+stroke (move + rotate only — resizing would need to rescale every stored
+point, an honest scope limit, not an oversight). No real-time collaborative
+annotation. No fix for Phase 4's own previously-documented text-composer-
+below-the-fold edge case beyond what already existed.
