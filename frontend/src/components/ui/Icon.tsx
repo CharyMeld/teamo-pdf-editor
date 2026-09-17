@@ -31,7 +31,14 @@ export type IconName =
   | "insertPage"
   | "merge"
   | "split"
-  | "drag";
+  | "drag"
+  | "bold"
+  | "italic"
+  | "alignLeft"
+  | "alignCenter"
+  | "alignRight"
+  | "image"
+  | "text";
 
 interface IconProps {
   name: IconName;
@@ -71,6 +78,13 @@ const PATHS: Record<IconName, string> = {
   merge: "M6 3v9a3 3 0 0 0 3 3h6M6 3H3l3-3 3 3H6ZM18 21v-9a3 3 0 0 0-3-3H9M18 21h3l-3 3-3-3h3Z",
   split: "M12 3v6M8 5l4-2 4 2M6 12h5v9H6v-9Zm7 0h5v9h-5v-9Z",
   drag: "M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01",
+  bold: "M7 4h6a3.5 3.5 0 0 1 0 7H7V4Zm0 7h7a3.5 3.5 0 0 1 0 7H7v-7Z",
+  italic: "M11 4h6M7 20h6M14 4 10 20",
+  alignLeft: "M4 6h16M4 12h10M4 18h14",
+  alignCenter: "M4 6h16M7 12h10M5 18h14",
+  alignRight: "M4 6h16M10 12h10M6 18h14",
+  image: "M4 5h16v14H4V5Zm3 10 3.5-4 3 3.5L16 11l4 8M8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z",
+  text: "M5 5h14M12 5v14M9 19h6",
 };
 
 export default function Icon({ name, className, size = 16 }: IconProps) {

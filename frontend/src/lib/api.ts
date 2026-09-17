@@ -313,3 +313,170 @@ export async function saveDocumentAs(id: string, title: string): Promise<NewDocu
   const { data } = await api.post<{ data: NewDocumentRef }>(`/documents/${id}/save-as`, { title });
   return data.data;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — EDIT: real content-editing operations against the backend's
+// FPDI/FPDF-backed engine (see ARCHITECTURE.md's Phase 4 (backend) section).
+// Content edits are just another kind of Phase 3 working-copy step, so they
+// share OperationResult's exact shape (plus `objectId`) and the same
+// undo/redo/Save machinery — no separate state model on the frontend either.
+
+export type ContentObjectType = "text" | "text_overlay_edit" | "image";
+export type TextAlign = "left" | "center" | "right";
+
+export interface TextObjectParams {
+  text: string;
+  font: "Helvetica" | "Times" | "Courier";
+  fontSize: number;
+  bold: boolean;
+  italic: boolean;
+  color: string;
+  align: TextAlign;
+  lineSpacing: number;
+}
+
+export interface ImageObjectParams {
+  storagePath?: string;
+  originalFilename?: string;
+}
+
+export interface ContentBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ContentObject {
+  objectId: string;
+  type: ContentObjectType;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  params: TextObjectParams | ImageObjectParams;
+}
+
+export interface ContentObjectsResponse {
+  objects: ContentObject[];
+  availableFonts: string[];
+}
+
+export interface ContentOperationResult extends OperationResult {
+  objectId: string;
+}
+
+export async function getContentObjects(id: string, page?: number): Promise<ContentObjectsResponse> {
+  const { data } = await api.get<{ data: ContentObject[]; availableFonts: string[] }>(
+    `/documents/${id}/content/objects`,
+    { params: page ? { page } : undefined },
+  );
+  return { objects: data.data, availableFonts: data.availableFonts };
+}
+
+export interface CreateTextObjectInput {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  params: TextObjectParams;
+}
+
+export function createTextObject(id: string, input: CreateTextObjectInput): Promise<ContentOperationResult> {
+  const { page, x, y, width, height, rotation, params } = input;
+  return api
+    .post<ContentOperationResult>(`/documents/${id}/content/objects`, {
+      type: "text",
+      page,
+      x,
+      y,
+      width,
+      height,
+      rotation,
+      params,
+    })
+    .then((r) => r.data);
+}
+
+export interface CreateOverlayEditInput extends CreateTextObjectInput {
+  coverOriginal: ContentBox;
+  coverColor?: string;
+}
+
+export function createOverlayTextEdit(
+  id: string,
+  input: CreateOverlayEditInput,
+): Promise<ContentOperationResult> {
+  const { page, x, y, width, height, rotation, params, coverOriginal, coverColor } = input;
+  return api
+    .post<ContentOperationResult>(`/documents/${id}/content/objects`, {
+      type: "text_overlay_edit",
+      page,
+      x,
+      y,
+      width,
+      height,
+      rotation,
+      // The backend validates/stores coverOriginal and coverColor as part
+      // of `params` (see DocumentContentController::validateObjectPayload
+      // and ContentObjectService), not as sibling top-level fields.
+      params: { ...params, coverOriginal, coverColor },
+    })
+    .then((r) => r.data);
+}
+
+export interface CreateImageObjectInput {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  file: File;
+}
+
+export function createImageObject(id: string, input: CreateImageObjectInput): Promise<ContentOperationResult> {
+  const form = new FormData();
+  form.append("type", "image");
+  form.append("page", String(input.page));
+  form.append("x", String(input.x));
+  form.append("y", String(input.y));
+  form.append("width", String(input.width));
+  form.append("height", String(input.height));
+  form.append("file", input.file);
+  return api.post<ContentOperationResult>(`/documents/${id}/content/objects`, form).then((r) => r.data);
+}
+
+export type PatchContentObjectInput = Partial<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  params: Partial<TextObjectParams>;
+}>;
+
+export function patchContentObject(
+  id: string,
+  objectId: string,
+  patch: PatchContentObjectInput,
+): Promise<ContentOperationResult> {
+  return api
+    .patch<ContentOperationResult>(`/documents/${id}/content/objects/${objectId}`, patch)
+    .then((r) => r.data);
+}
+
+export function deleteContentObject(id: string, objectId: string): Promise<ContentOperationResult> {
+  return api.delete<ContentOperationResult>(`/documents/${id}/content/objects/${objectId}`).then((r) => r.data);
+}
+
+export function duplicateContentObject(id: string, objectId: string): Promise<ContentOperationResult> {
+  return api
+    .post<ContentOperationResult>(`/documents/${id}/content/objects/${objectId}/duplicate`)
+    .then((r) => r.data);
+}

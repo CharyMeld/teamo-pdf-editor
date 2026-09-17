@@ -4,9 +4,11 @@ import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import IconButton from "../ui/IconButton";
 import DevSelectionSimulator from "./DevSelectionSimulator";
 import DocumentPanel from "./panels/DocumentPanel";
+import ImageObjectPanel from "./panels/ImageObjectPanel";
 import PagePanel from "./panels/PagePanel";
 import PropertiesPanel from "./panels/PropertiesPanel";
 import SelectionPanel from "./panels/SelectionPanel";
+import TextObjectPanel from "./panels/TextObjectPanel";
 
 function InspectorBody() {
   const { selection } = useSelectionContext();
@@ -16,9 +18,9 @@ function InspectorBody() {
       <DevSelectionSimulator />
       {selection === "none" && <DocumentPanel />}
       {selection === "page" && <PagePanel />}
-      {(selection === "text" || selection === "image" || selection === "annotation") && (
-        <SelectionPanel kind={selection} />
-      )}
+      {selection === "text" && <TextObjectPanel />}
+      {selection === "image" && <ImageObjectPanel />}
+      {selection === "annotation" && <SelectionPanel kind={selection} />}
       <PropertiesPanel />
     </div>
   );

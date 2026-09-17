@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import ContentObjectLayer from "../../content-editor/ContentObjectLayer";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { pdfjsLib } from "../../lib/pdf";
@@ -259,6 +260,17 @@ export default function PdfViewer() {
                 <div className="flex h-full w-full items-center justify-center border border-border/60 bg-surface-muted">
                   <Spinner size={14} label={`Page ${entry.pageNumber}`} />
                 </div>
+              )}
+              {/* Phase 4's content-object overlay only tracks the currently
+                  viewed page (see useContentObjects's fetch scope), and
+                  only makes sense once that page has actually rendered. */}
+              {isVisible && !hasError && entry.pageNumber === view.currentPage && (
+                <ContentObjectLayer
+                  pageNumber={entry.pageNumber}
+                  widthPt={entry.widthPt}
+                  heightPt={entry.heightPt}
+                  scale={scale}
+                />
               )}
               <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-text-subtle">
                 {entry.pageNumber}

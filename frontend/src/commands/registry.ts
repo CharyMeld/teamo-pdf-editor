@@ -89,7 +89,10 @@ export const REGISTRY: Command[] = [
     tab: "EDIT",
     group: "Content",
     keywords: ["text box", "type"],
-    status: UNIMPLEMENTED,
+    icon: "text",
+    // Real as of Phase 4 (content-editing engine) — see
+    // useContentEditorRunHandlers / content-editor/useContentObjects.
+    status: "available",
   },
   {
     id: "edit.addImage",
@@ -98,16 +101,18 @@ export const REGISTRY: Command[] = [
     tab: "EDIT",
     group: "Content",
     keywords: ["picture", "insert image"],
-    status: UNIMPLEMENTED,
+    icon: "image",
+    status: "available",
   },
   {
     id: "edit.editText",
     label: "Edit Text",
-    description: "Edit existing text directly on the page",
+    description: "Cover existing text with new text (overlay edit)",
     tab: "EDIT",
     group: "Content",
     keywords: ["modify text", "change text"],
-    status: UNIMPLEMENTED,
+    icon: "text",
+    status: "available",
   },
   {
     id: "edit.undo",
@@ -697,7 +702,9 @@ export const CONTEXTUAL_COMMANDS: Record<Exclude<SelectionType, "none">, Command
       tab: "EDIT",
       group: "Selected Text",
       keywords: ["remove text"],
-      status: UNIMPLEMENTED,
+      icon: "trash",
+      // Real as of Phase 4 — see useContentEditorRunHandlers.
+      status: "available",
     },
   ],
   image: [
@@ -726,7 +733,9 @@ export const CONTEXTUAL_COMMANDS: Record<Exclude<SelectionType, "none">, Command
       tab: "EDIT",
       group: "Selected Image",
       keywords: ["remove image"],
-      status: UNIMPLEMENTED,
+      icon: "trash",
+      // Real as of Phase 4 — see useContentEditorRunHandlers.
+      status: "available",
     },
   ],
   annotation: [

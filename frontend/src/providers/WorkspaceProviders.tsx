@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { SelectionProvider } from "../commands/useSelectionContext";
+import { ContentObjectsProvider } from "../content-editor/useContentObjects";
 import { ActiveTabProvider } from "../hooks/useActiveTab";
 import { DocumentViewProvider } from "../hooks/useDocumentViewState";
 import { OpenDocumentProvider } from "../hooks/useOpenDocument";
@@ -23,9 +24,11 @@ export default function WorkspaceProviders({ children }: { children: ReactNode }
         <DocumentViewProvider>
           <OpenDocumentProvider>
             <WorkingDocumentProvider>
-              <PageSelectionProvider>
-                <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
-              </PageSelectionProvider>
+              <ContentObjectsProvider>
+                <PageSelectionProvider>
+                  <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                </PageSelectionProvider>
+              </ContentObjectsProvider>
             </WorkingDocumentProvider>
           </OpenDocumentProvider>
         </DocumentViewProvider>

@@ -75,6 +75,14 @@ interface WorkingDocumentContextValue {
    * call (e.g. "drag pages to reorder"). */
   notify: (notice: Notice) => void;
   thumbnailUrl: (pageNumber: number) => string;
+  /** Applies a Phase 3-shaped operation result (pageCount/canUndo/canRedo)
+   * and kicks off the same thumbnail-poll/revision-bump path every ORGANIZE
+   * operation already goes through — exposed so Phase 4's content-object
+   * mutations (which share the exact same `document_edit_operations`
+   * step/pointer chain server-side, see ARCHITECTURE.md's Phase 4 section)
+   * stay in sync with the same Undo/Redo buttons and thumbnail panel
+   * without a second parallel state mechanism. */
+  applyOperationResult: (result: { pageCount: number; canUndo: boolean; canRedo: boolean }) => void;
 
   runDelete: (pages: number[]) => Promise<void>;
   runDuplicate: (pages: number[]) => Promise<void>;
@@ -274,6 +282,20 @@ export function WorkingDocumentProvider({ children }: { children: ReactNode }) {
     [doc, source],
   );
 
+  const applyOperationResult = useCallback(
+    (result: { pageCount: number; canUndo: boolean; canRedo: boolean }) => {
+      if (!doc) return;
+      setPageCount(result.pageCount);
+      setCanUndo(result.canUndo);
+      setCanRedo(result.canRedo);
+      setSource("step");
+      setThumbnailsPending(true);
+      setRevision((r) => r + 1);
+      pollWorkingPages(doc.id);
+    },
+    [doc, pollWorkingPages],
+  );
+
   /** Wraps every mutating call: sets busy/label, runs it, applies the
    * OperationResult to local state, kicks off thumbnail polling, and turns
    * any rejection into a real, specific notice — never a silent failure. */
@@ -284,13 +306,7 @@ export function WorkingDocumentProvider({ children }: { children: ReactNode }) {
       setBusyLabel(label);
       try {
         const result = await action();
-        setPageCount(result.pageCount);
-        setCanUndo(result.canUndo);
-        setCanRedo(result.canRedo);
-        setSource("step");
-        setThumbnailsPending(true);
-        setRevision((r) => r + 1);
-        pollWorkingPages(doc.id);
+        applyOperationResult(result);
       } catch (error) {
         showNotice({ type: "error", message: extractErrorMessage(error, `${label} failed.`) });
       } finally {
@@ -298,7 +314,7 @@ export function WorkingDocumentProvider({ children }: { children: ReactNode }) {
         setBusyLabel(null);
       }
     },
-    [doc, busy, pollWorkingPages, showNotice],
+    [doc, busy, applyOperationResult, showNotice],
   );
 
   const runDelete = useCallback(
@@ -535,6 +551,7 @@ export function WorkingDocumentProvider({ children }: { children: ReactNode }) {
     dismissNotice,
     notify: showNotice,
     thumbnailUrl,
+    applyOperationResult,
     runDelete,
     runDuplicate,
     runRotate,
