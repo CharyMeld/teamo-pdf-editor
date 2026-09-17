@@ -1234,3 +1234,140 @@ touches (this app has no email-validated user input yet), and not a
 regression introduced by installing `setasign/fpdi`/`setasign/fpdf`. Left
 for a dedicated framework-upgrade decision rather than bundled into this
 phase's scope.
+
+## Phase 4 (frontend) — real content-editing UI (2026-09-17)
+
+Wires the EDIT ribbon and Smart Inspector to Phase 4 (backend)'s content-
+object API above. No backend endpoint changes — one frontend request-shape
+bug against the existing contract, see "Real bugs" below.
+
+### Provider and canvas mount
+
+`ContentObjectsProvider` (`content-editor/useContentObjects.tsx`) joins
+`WorkspaceProviders`, nested inside `WorkingDocumentProvider` (needs
+`useWorkingDocument.applyOperationResult`) and wrapping `PageSelectionProvider`.
+It fetches the *current page's* active objects (`GET .../content/objects?page=`)
+whenever the open document, current page, or `useWorkingDocument.revision`
+changes, and exposes placement mode, the selected object, and one mutating
+call per backend operation (create text/overlay-edit/image, patch, delete,
+duplicate) — each routed through a shared `runMutating()` that applies the
+returned `OperationResult` via `useWorkingDocument.applyOperationResult`
+(new, extracted from that hook's existing mutating-wrapper so Phase 4's
+content mutations share the exact same Undo/Redo/thumbnail-poll path Phase
+3's page operations use, rather than a second parallel mechanism) and
+re-fetches the object list.
+
+`ContentObjectLayer` mounts as an absolutely-positioned sibling on top of
+the pdf.js `<canvas>` for whichever page is currently viewed (`PdfViewer`),
+using the same bottom-left-origin PDF-point ↔ screen-pixel conversion
+Phase 3's `CropDialog` established. It renders every active object as a
+selectable/draggable/resizable/rotatable overlay (four corner handles plus
+a rotate handle when selected), and implements the click-and-drag
+placement gesture for a new text/overlay-edit/image object — drawing a box
+either opens `TextComposerPopover` (text/overlay-edit) or opens a hidden
+file input via a `filechooser`-style click (image).
+
+### Text styling and Smart Inspector panels
+
+`TextStyleFields` (font/size/bold/italic/align/color/line-spacing) is
+shared verbatim between `TextComposerPopover` (placement-time) and the new
+`TextObjectPanel`/`ImageObjectPanel` (post-creation editing, replacing the
+Phase 1 dev-stub `SelectionPanel` for `selection: "text" | "image"` —
+`SelectionPanel` itself now only renders for `"annotation"`, the one
+selection type still real-canvas-less pending Phase 5). Style toggles
+(bold/italic/align/font/color) commit immediately on change; free-text
+fields (the text content itself, font size, line spacing) commit on blur
+so typing a number or a sentence doesn't fire a network call per keystroke.
+
+### EDIT ribbon commands
+
+`edit.addText`/`edit.addImage`/`edit.editText` (Phase 1 stubs) and the
+`context.text.delete`/`context.image.delete` contextual commands flip to
+`"available"`. `hooks/useContentEditorRunHandlers.ts` builds their real
+`runHandlers`/`disabledReasons` maps — the same shape
+`useOrganizeRunHandlers` established for ORGANIZE — merged into
+`CommandRibbon`'s existing map alongside it. "Add Image" doesn't need a
+separate ribbon-level file-picker trigger: arming placement mode is enough,
+`ContentObjectLayer` itself opens the file chooser once the user draws the
+placement box, keeping "where does this interaction live" consistent with
+text/overlay-edit placement.
+
+### `DevSelectionSimulator`
+
+`"text"` and `"image"` removed from the simulated selection types (real
+canvas selection exists now, via `ContentObjectLayer`) — the same removal
+Phase 3 did for `"page"`. Only `"annotation"` remains simulated, pending
+Phase 5.
+
+### Real bugs found and fixed during this phase's own testing
+
+All four found only by actually driving the feature in a real browser
+against the live stack (typecheck/build caught none of them):
+
+- **Wrong JSON level for `text_overlay_edit`'s `coverOriginal`/
+  `coverColor`.** `lib/api.ts`'s `createOverlayTextEdit` posted them as
+  sibling top-level fields; the backend (`DocumentContentController::
+  validateObjectPayload`, `ContentObjectService::normalizeParams`) requires
+  them nested inside `params`. Every real "Edit Text" placement would have
+  `422`'d against the live backend — confirmed by reproducing the real
+  request in a browser before the fix, and a real successful overlay-edit
+  object after.
+- **A mutation's own revision bump undid the selection it had just made.**
+  `useContentObjects`'s effect resetting selection/refetching on a
+  `useWorkingDocument.revision` change (intended for an ORGANIZE page
+  operation invalidating the whole content-object chain) also fired on
+  every content mutation's *own* revision bump — so `commitTextPlacement`'s
+  `selectObject(result.objectId)` right after creating an object was
+  immediately overwritten back to `"none"` on the next render. Fixed with a
+  `selfCausedRevisionRef` flag set immediately before a self-triggered
+  `applyOperationResult` call and consumed (skipping the reset) at the top
+  of that effect.
+- **`selectObject` derived an object's type from a not-yet-refetched
+  array.** Looking up `objects.find(o => o.objectId === id)` right after
+  create/duplicate raced the `refetch()` that would actually add it,
+  silently falling through to `selection: "none"`. Fixed by letting
+  `selectObject` take an optional explicit `knownType`, which every
+  creator/duplicator now passes directly instead of relying on the lookup.
+- **Clicking an existing object while armed to place a new one moved the
+  existing object instead.** `ContentObjectLayer`'s per-object
+  `startObjectDrag` didn't check `placementMode`, so drawing a new
+  placement box over an existing object's bounds started a move/resize/
+  rotate gesture on that object rather than the intended new-object
+  placement. Fixed by ignoring object-level pointer handlers entirely
+  while `placementMode` is set.
+
+### Testing
+
+No `chromium-cli` available in this sandbox (no network access to its
+browser-download CDN either); driven instead via Playwright's Node API
+pointed at the system's already-installed `google-chrome-stable`, against
+the real live stack (`php artisan serve` + `php artisan queue:work` — the
+latter's absence was itself briefly rediscovered as "why is this document
+stuck in Processing forever" before being started — + `vite dev`). Verified
+end-to-end, screenshot-confirmed at each step: creating a real text object,
+a real inserted image, and a real overlay text-edit on the same page, each
+producing the correct contextual ribbon group (`TEXT SELECTED` / `IMAGE
+SELECTED`) and the correct Smart Inspector panel with real editable
+controls (not the old dev-simulated `SelectionPanel` stub); and, critically,
+that all three objects survived a real Save → full page reload → reopen
+round trip, confirmed by re-viewing the reopened document's page 1 with all
+three objects still present and correctly rendered — not just that the
+`OperationResult` claimed success.
+
+One incidental, non-blocking finding from this same testing session, left
+as-is rather than fixed: a text/overlay-edit box drawn in a page's lower
+portion can leave `TextComposerPopover`'s Confirm/Cancel row below the
+visible scrollable viewport (the popover's `popoverBelow` placement logic
+only accounts for room within the *page*, not the browser's actual
+scrolled viewport), and reaching it by scrolling the main canvas also
+shifts `view.currentPage` via the scroll-position `IntersectionObserver` —
+cosmetic (the object still gets created at the correct position regardless)
+but a genuine minor UX rough edge for a future polish pass. A defensive
+`scrollIntoView` was added on the popover's mount, which helps but doesn't
+fully solve the general case.
+
+### What Phase 4 (frontend) does NOT include
+
+Annotations (Phase 5) — `SelectionPanel`/`CONTEXTUAL_COMMANDS.annotation`
+remain the Phase 1 stub. No backend changes. No fix for the popover
+below-the-fold edge case beyond the mitigation noted above.
