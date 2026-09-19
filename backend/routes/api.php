@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\CompressionController;
 use App\Http\Controllers\Api\ConversionController;
 use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\DocumentAnnotationController;
@@ -132,4 +133,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/{document}/conversions/jobs/{job}', [ConversionController::class, 'show']);
     Route::get('/documents/{document}/conversions/jobs/{job}/download', [ConversionController::class, 'download']);
     Route::post('/office-conversions', [OfficeConversionController::class, 'store']);
+
+    // Phase 9 (PDF and file compression): real compression against a
+    // document's current working state, queued and polled exactly like
+    // Phase 8's conversions — see CompressionService's docblock for why
+    // the default result is a standalone downloadable file, and why
+    // "replace" is a normal, undoable working-copy step rather than an
+    // immediate overwrite.
+    Route::post('/documents/{document}/compressions', [CompressionController::class, 'store']);
+    Route::get('/documents/{document}/compressions/jobs/{job}', [CompressionController::class, 'show']);
+    Route::get('/documents/{document}/compressions/jobs/{job}/download', [CompressionController::class, 'download']);
+    Route::post('/documents/{document}/compressions/jobs/{job}/replace', [CompressionController::class, 'replace']);
 });
