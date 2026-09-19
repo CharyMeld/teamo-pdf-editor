@@ -43,7 +43,7 @@ export interface Command {
   dropdown?: Command[];
 }
 
-export type SelectionType = "none" | "page" | "text" | "image" | "annotation";
+export type SelectionType = "none" | "page" | "text" | "image" | "annotation" | "form";
 
 export const SELECTION_TYPES: SelectionType[] = [
   "none",
@@ -51,4 +51,5 @@ export const SELECTION_TYPES: SelectionType[] = [
   "text",
   "image",
   "annotation",
+  "form",
 ];

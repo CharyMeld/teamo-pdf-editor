@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AnnotationsProvider } from "../annotations/useAnnotations";
 import { SelectionProvider } from "../commands/useSelectionContext";
 import { ContentObjectsProvider } from "../content-editor/useContentObjects";
+import { FormFieldsProvider } from "../forms/useFormFields";
 import { ActiveTabProvider } from "../hooks/useActiveTab";
 import { DocumentViewProvider } from "../hooks/useDocumentViewState";
 import { OpenDocumentProvider } from "../hooks/useOpenDocument";
@@ -36,25 +37,31 @@ export default function WorkspaceProviders({ children }: { children: ReactNode }
               <WorkingDocumentProvider>
                 <ContentObjectsProvider>
                   <AnnotationsProvider>
-                    <PageSelectionProvider>
-                      {/* Phase 7 (OCR): needs the open document, working
-                          copy (applyOperationResult), and page selection —
-                          sits inside all three for that reason. */}
-                      <OcrWorkflowProvider>
-                        {/* Phase 8 (conversion): same dependency shape as
-                            OCR — the open document, working copy
-                            (pageCount), and page selection (images-format
-                            scope). */}
-                        <ConversionWorkflowProvider>
-                          {/* Phase 9 (compression): only needs the open
-                              document + working copy (applyOperationResult
-                              for "replace") — no page selection. */}
-                          <CompressionWorkflowProvider>
-                            <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
-                          </CompressionWorkflowProvider>
-                        </ConversionWorkflowProvider>
-                      </OcrWorkflowProvider>
-                    </PageSelectionProvider>
+                    {/* Phase 10 (forms): a third, independent sibling
+                        chain to content objects/annotations above — same
+                        dependency shape (open document, working copy,
+                        selection). */}
+                    <FormFieldsProvider>
+                      <PageSelectionProvider>
+                        {/* Phase 7 (OCR): needs the open document, working
+                            copy (applyOperationResult), and page selection —
+                            sits inside all three for that reason. */}
+                        <OcrWorkflowProvider>
+                          {/* Phase 8 (conversion): same dependency shape as
+                              OCR — the open document, working copy
+                              (pageCount), and page selection (images-format
+                              scope). */}
+                          <ConversionWorkflowProvider>
+                            {/* Phase 9 (compression): only needs the open
+                                document + working copy (applyOperationResult
+                                for "replace") — no page selection. */}
+                            <CompressionWorkflowProvider>
+                              <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                            </CompressionWorkflowProvider>
+                          </ConversionWorkflowProvider>
+                        </OcrWorkflowProvider>
+                      </PageSelectionProvider>
+                    </FormFieldsProvider>
                   </AnnotationsProvider>
                 </ContentObjectsProvider>
               </WorkingDocumentProvider>

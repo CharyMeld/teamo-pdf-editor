@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AnnotationLayer from "../../annotations/AnnotationLayer";
 import ContentObjectLayer from "../../content-editor/ContentObjectLayer";
+import FormFieldLayer from "../../forms/FormFieldLayer";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { pdfjsLib } from "../../lib/pdf";
@@ -281,6 +282,11 @@ export default function PdfViewer() {
                   time. */}
               {isVisible && !hasError && entry.pageNumber === view.currentPage && (
                 <AnnotationLayer pageNumber={entry.pageNumber} heightPt={entry.heightPt} scale={scale} />
+              )}
+              {/* Phase 10's form-field overlay — same current-page-only
+                  scoping as the two layers above. */}
+              {isVisible && !hasError && entry.pageNumber === view.currentPage && (
+                <FormFieldLayer pageNumber={entry.pageNumber} heightPt={entry.heightPt} scale={scale} />
               )}
               <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-text-subtle">
                 {entry.pageNumber}

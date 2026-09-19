@@ -964,3 +964,126 @@ export async function replaceWithCompression(id: string, jobId: number): Promise
   const { data } = await api.post<OperationResult>(`/documents/${id}/compressions/jobs/${jobId}/replace`);
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 10 — PDF forms. A real, independent `form_field_*` working-copy
+// chain (a sibling to Phase 4's content objects and Phase 5's annotations)
+// — see FormFieldService's docblock server-side. Five field types are real,
+// native, independently fillable AcroForm widgets; `signature` is a visual
+// placeholder only (see FormFieldEngine's docblock) — full signing is a
+// later phase. Fill/clear are just another mutation of the same chain, so
+// filled values survive later design edits (add/move/resize a field) —
+// a real bug found and fixed during this phase's own testing.
+
+export type FormFieldType = "text" | "checkbox" | "radio" | "dropdown" | "date" | "signature";
+
+export interface TextFieldParams {
+  required: boolean;
+  defaultValue: string;
+  maxLength: number | null;
+  multiline: boolean;
+}
+export interface DateFieldParams {
+  required: boolean;
+  defaultValue: string;
+  dateFormat: string;
+}
+export interface CheckboxFieldParams {
+  required: boolean;
+  label: string;
+  defaultChecked: boolean;
+}
+export interface RadioFieldParams {
+  required: boolean;
+  groupName: string;
+  optionValue: string;
+  defaultSelected: boolean;
+}
+export interface DropdownFieldParams {
+  required: boolean;
+  options: string[];
+  defaultValue: string;
+}
+export interface SignatureFieldParams {
+  label: string;
+}
+
+export type FormFieldParams =
+  | TextFieldParams
+  | DateFieldParams
+  | CheckboxFieldParams
+  | RadioFieldParams
+  | DropdownFieldParams
+  | SignatureFieldParams;
+
+export interface FormField {
+  fieldId: string;
+  type: FormFieldType;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  params: FormFieldParams;
+}
+
+export interface FormFieldOperationResult extends OperationResult {
+  fieldId: string;
+}
+
+export async function getFormFields(id: string, page?: number): Promise<FormField[]> {
+  const { data } = await api.get<{ data: FormField[] }>(`/documents/${id}/form/fields`, {
+    params: page ? { page } : undefined,
+  });
+  return data.data;
+}
+
+export interface CreateFormFieldInput {
+  type: FormFieldType;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  params: Record<string, unknown>;
+}
+
+export function createFormField(id: string, input: CreateFormFieldInput): Promise<FormFieldOperationResult> {
+  return api.post<FormFieldOperationResult>(`/documents/${id}/form/fields`, input).then((r) => r.data);
+}
+
+export type PatchFormFieldInput = Partial<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  params: Record<string, unknown>;
+}>;
+
+export function patchFormField(
+  id: string,
+  fieldId: string,
+  patch: PatchFormFieldInput,
+): Promise<FormFieldOperationResult> {
+  return api.patch<FormFieldOperationResult>(`/documents/${id}/form/fields/${fieldId}`, patch).then((r) => r.data);
+}
+
+export function deleteFormField(id: string, fieldId: string): Promise<FormFieldOperationResult> {
+  return api.delete<FormFieldOperationResult>(`/documents/${id}/form/fields/${fieldId}`).then((r) => r.data);
+}
+
+export function duplicateFormField(id: string, fieldId: string): Promise<FormFieldOperationResult> {
+  return api.post<FormFieldOperationResult>(`/documents/${id}/form/fields/${fieldId}/duplicate`).then((r) => r.data);
+}
+
+/** Keyed by fieldId for text/checkbox/dropdown/date, or by groupName for a radio group. */
+export function fillFormValues(id: string, values: Record<string, unknown>): Promise<OperationResult> {
+  return api.post<OperationResult>(`/documents/${id}/form/fill`, { values }).then((r) => r.data);
+}
+
+export function clearFormValues(id: string, fieldKeys?: string[]): Promise<OperationResult> {
+  return api.post<OperationResult>(`/documents/${id}/form/clear`, { fieldKeys }).then((r) => r.data);
+}

@@ -2443,3 +2443,205 @@ only, per above — there is no multi-document-selection surface in this
 app yet for it to attach to). No compression cancellation (the brief
 didn't ask for it here the way it explicitly did for OCR). No signing,
 AI, or forms.
+
+## Phase 10 (backend) — real, native PDF forms engine (2026-09-19)
+
+FORMS is now real: six field types (text, checkbox, radio, dropdown,
+date, signature), create/move/resize/edit-properties/duplicate/delete,
+and fill/save/clear — with five of the six producing genuine, native,
+interactive PDF `Widget` annotations inside a real `/AcroForm` dictionary,
+independently fillable by Acrobat, browsers, or any other PDF tool, not
+merely drawn to look like fields.
+
+### The central technical question, resolved by real testing first
+
+Phase 4/5's engines (`PdfContentEngine`, `PdfAnnotationEngine`) use
+`setasign/fpdi` + `setasign/fpdf` — real vector drawing, but FPDF has no
+AcroForm support at all. A real form needs a different drawing engine.
+`tecnickcom/tcpdf` (LGPL-3.0, same "no commercial licensing needed" bar
+as FPDI/FPDF) has genuine `TextField()`/`CheckBox()`/`RadioButton()`/
+`ComboBox()` APIs, and `setasign/fpdi` 2.6 already ships a TCPDF-flavored
+import class (`\setasign\Fpdi\Tcpdf\Fpdi`) — the *same* "import existing
+pages as templates, draw new things on top" technique `PdfContentEngine`
+already uses, with TCPDF as the drawing engine instead of FPDF. Both
+packages were added and the full pipeline verified with `pdftk dump_data_fields`
+(real `FieldType: Text`/`Button`/`Choice` entries) and `qpdf --check`
+before any service code was written.
+
+### Four real, non-obvious gotchas found and fixed during this phase
+
+1. **TCPDF's constructor unconditionally sets a protected `$tcpdflink = true`**,
+   which stamps a literal "Powered by TCPDF (www.tcpdf.org)" credit line
+   onto the last page as real page content — surviving
+   `setPrintHeader(false)`/`setPrintFooter(false)` and even a no-op
+   `Footer()` override, since it's drawn directly from `Close()`. Setting
+   the property in a subclass's own property declaration is silently
+   overwritten by the parent constructor (which runs after PHP's
+   property-initializer phase); it must be reset in a constructor that
+   calls `parent::__construct()` first. See `QuietFormFpdi` in
+   `FormFieldEngine.php`.
+2. **`ComboBox()`'s `value` prop must be a plain string, not an array**,
+   to set the real current selection. TCPDF's `getAnnotOptFromJSProp()`
+   treats an array `value` as a completely different thing (per-option
+   export-value overrides) and silently produces no real selection at
+   all — confirmed empirically: an array-valued `defaultValue` passed
+   `pdftk dump_data_fields` with no `FieldValue:` line whatsoever despite
+   a value being "set." See `FormFieldEngine::dropdownProp()`.
+3. **A real architectural bug, caught only by testing the actual PDF
+   output, not the API response**: fill/clear were originally planned as
+   a separate `pdftk fill_form`-based service (`FormFillService`,
+   verified working in isolation during planning). Wiring it in revealed
+   that `FormFieldEngine::compose()` always rebuilds every field fresh
+   from its own stored default value on ANY design mutation — a value set
+   out-of-band via pdftk was silently destroyed the next time a *different*
+   field was added/moved/resized. Fixed by folding fill/clear into the
+   same `form_field_*` chain `FormFieldService` already manages: each
+   field's own `params` (`defaultValue`/`defaultChecked`/`defaultSelected`)
+   *is* its real current value (confirmed: TCPDF's `value`/`checked`/
+   `selected` props were never a cosmetic "default" distinct from the
+   real `/V`, every prior test's `defaultChecked: true` already produced
+   a real `FieldValue: Yes`), so filling is just another chain mutation.
+   This also eliminated the separate `pdftk`-based service entirely — one
+   fewer moving part, not more. A closely-related naming bug caught in the
+   same pass: the chain's own prefix check (`str_starts_with($op, 'form_')`)
+   originally collided with `form_fill`'s operation type, silently
+   resetting the design chain to empty on every fill — fixed by renaming
+   the design-mutation prefix to `form_field_*`, distinct from `form_fill`/
+   `form_clear`.
+4. **This app's global middleware converts an empty request string to
+   `null` before validation runs**, and Laravel's `sometimes` rule only
+   skips a key that's entirely *absent* — a key present with a `null`
+   value (an empty text field's default value, or an explicit
+   `maxLength: null` meaning "no limit") still gets validated and
+   rejected by a bare `string`/`integer` rule. Fixed by adding `nullable`
+   alongside `sometimes` on every optionally-empty form-field param.
+   Caught via a real 422 during this phase's own browser testing, not
+   assumed away.
+
+### `FormFieldEngine` / `FormFieldService`
+
+`FormFieldEngine` (`app/Domain/Forms/Services/`) mirrors
+`PdfContentEngine`'s recomposition shape exactly. `FormFieldService`
+mirrors `ContentObjectService`/`AnnotationService`'s chain model — a
+THIRD independent sibling chain (`form_field_*` prefix), with the same
+interleaving "flattening" semantics those two already documented: no
+existing code needed to change for this to exist.
+
+**Honest scope boundary — signature fields**: drawn as a plain dashed
+placeholder box + label via ordinary `Rect()`/`Cell()` calls, deliberately
+**not** a real AcroForm field. A real `/FT /Sig` field is tied to
+cryptographic signing — a later phase's explicit job, which must "clearly
+distinguish visual placement from cryptographic signing." Filling a
+signature field is rejected server-side (`FormException::notFillable()`),
+not silently accepted.
+
+**Auto-Detect Fields stays unimplemented**: reliably detecting candidate
+fields (blank/bordered regions) in an arbitrary existing PDF is a real
+computer-vision-adjacent problem this stack's tools don't solve — not
+faked.
+
+### API
+
+```
+GET    /documents/{document}/form/fields                    -> design metadata + real current value per field
+POST   /documents/{document}/form/fields                    {type, page, x, y, width, height, params} -> field + OperationResult
+PATCH  /documents/{document}/form/fields/{fieldId}           {x?, y?, width?, height?, rotation?, params?} -> OperationResult
+DELETE /documents/{document}/form/fields/{fieldId}           -> OperationResult
+POST   /documents/{document}/form/fields/{fieldId}/duplicate -> OperationResult
+POST   /documents/{document}/form/fill                       {values: {fieldKey: value}} -> OperationResult
+POST   /documents/{document}/form/clear                      {fieldKeys?: string[]} -> OperationResult
+```
+
+`values`/`fieldKeys` are keyed by a field's own `fieldId` for text/
+checkbox/dropdown/date, or by the shared `groupName` for a radio group
+(radio options share one real PDF field — see
+`FormFieldEngine::radioGroupFieldName()`).
+
+### Verified working (2026-09-19)
+
+Against the live stack: all six field types created on a real 3-page test
+PDF, verified via `pdftk dump_data_fields` (real `Text`/`Button`/`Choice`
+entries, correct required flags, correct radio-group merging, no
+"Powered by TCPDF" text anywhere via `pdftotext`) and `qpdf --check`;
+move/resize/duplicate/delete each, confirmed via the chain recomposing
+correctly; filled real values into text/checkbox/radio/dropdown/date,
+confirmed via `pdftk dump_data_fields` — including confirming a filled
+value **survives** a later, unrelated design mutation (the bug found and
+fixed above); cleared and confirmed values genuinely reset; Undo
+confirmed restoring prior filled values; signature-field fill correctly
+rejected (422); **Saved the document and directly inspected the new,
+real `DocumentVersion` file** — `pdftk dump_data_fields` on the actual
+saved PDF (not the working copy) confirmed the text field and checkbox's
+real values survived a genuine Save, `qpdf --check` clean, page
+count/size preserved.
+
+### What Phase 10 (backend) does NOT include
+
+Real interactive signature fields (placeholder only — see above; full
+signing is a later phase). Auto-field-detection (see above). The
+frontend (delivered in the same session — see below). No AI.
+
+## Phase 10 (frontend) — real forms UI (2026-09-19)
+
+FORMS had four scaffolded commands (missing radio/dropdown/date
+entirely, the same kind of registry gap Phases 7/8/9 also found); all
+six field-placement commands plus "Clear All Fields" are now real,
+following the exact `useContentObjects`/`ContentObjectLayer` (Phase 4)
+and `useAnnotations`/`AnnotationLayer` (Phase 5) pattern: a third,
+independent `useFormFields` provider + `FormFieldLayer` canvas overlay,
+with a new `"form"` `SelectionType` routing the Smart Inspector to
+`FormFieldPanel`, which dispatches to one of six type-specific panels
+(`TextFieldPanel`, `CheckboxFieldPanel`, `RadioFieldPanel`,
+`DropdownFieldPanel`, `DateFieldPanel`, `SignatureFieldPanel`) — the
+Phase 10 equivalent of `AnnotationPanel`'s ten-type dispatch.
+
+Placement is click-and-drag like every prior phase's objects, but
+simpler than Phase 4's text objects: every field type has an immediately
+valid, non-empty default (an empty text/dropdown/date field is a
+perfectly normal starting state, unlike Phase 4's text object), so there
+is no composer-popover step — a field is created and selected the moment
+the user releases the drag, refined afterward via the Smart Inspector.
+
+**Filling *is* editing, not a separate mode**: since the backend folds
+fill/clear into the same field-params chain (see the backend section's
+bug #3), each panel's "Current value"/"Checked"/"Current selection"
+control edits the field's real value directly via the same `fillValues`
+action the ribbon's "Clear All Fields" uses — no separate Design/Fill
+mode toggle was needed, a simplification found during implementation
+that still fully covers "fill fields"/"clear fields where appropriate."
+
+### A real bug this phase's own testing re-confirmed (not a new class of bug)
+
+A checkbox/select bound directly (`checked={field.params.x}`) to
+prop-derived state that only updates once its `fillValues`/`patchSelected`
+round-trip resolves visibly snaps back for the duration of the request —
+confirmed via a real Playwright `.check()` failing with "did not change
+its state," the *exact* failure mode [[phase6_scanning_findings]]
+already documented for `ScanImageEditorPanel`. Fixed the same way: an
+optimistic local-state overlay per panel, reset only when the *selected
+field* changes, merged on top of the server params for every
+immediately-committing control (every checkbox, the dropdown's
+selection); blur-committed text fields were already safe by construction.
+Applied preemptively across all six panels once found in one, per that
+finding's own "apply this pattern preemptively" note.
+
+### Testing
+
+Playwright against `google-chrome-stable`, driven against the real live
+stack end-to-end: uploaded a real test PDF, placed a text field and a
+checkbox from the FORMS ribbon via real canvas drags, confirmed the
+Smart Inspector's type-specific panel appeared, typed a real value into
+the text field and toggled the checkbox (both real backend calls, not
+local-only state), saved the document, and confirmed via the backend
+section's direct file inspection that both values genuinely persisted
+into the new saved `DocumentVersion`. Screenshot-confirmed throughout,
+including the ribbon's six field-placement commands, the contextual
+"Form Selected" Duplicate/Delete group, and the Smart Inspector's live
+Checkbox Field panel.
+
+### What Phase 10 (frontend) does NOT include
+
+Any UI for auto-field-detection (backend stays unimplemented — see
+above). A distinct Design/Fill mode toggle (found unnecessary — see
+above). Real signature capture/placement (Phase 11's job — the
+placeholder panel says so explicitly). No AI.

@@ -4,6 +4,7 @@ import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import IconButton from "../ui/IconButton";
 import AnnotationPanel from "./panels/AnnotationPanel";
 import DocumentPanel from "./panels/DocumentPanel";
+import FormFieldPanel from "./panels/FormFieldPanel";
 import ImageObjectPanel from "./panels/ImageObjectPanel";
 import PagePanel from "./panels/PagePanel";
 import PropertiesPanel from "./panels/PropertiesPanel";
@@ -19,6 +20,7 @@ function InspectorBody() {
       {selection === "text" && <TextObjectPanel />}
       {selection === "image" && <ImageObjectPanel />}
       {selection === "annotation" && <AnnotationPanel />}
+      {selection === "form" && <FormFieldPanel />}
       <PropertiesPanel />
     </div>
   );

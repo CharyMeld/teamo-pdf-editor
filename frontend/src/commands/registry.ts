@@ -451,7 +451,10 @@ export const REGISTRY: Command[] = [
     tab: "FORMS",
     group: "Fields",
     keywords: ["form field", "input"],
-    status: UNIMPLEMENTED,
+    // Real as of Phase 10 (PDF forms) — a genuine, native, interactive
+    // AcroForm widget (verified via pdftk dump_data_fields), not a
+    // drawing — see forms/useFormFields and FormFieldLayer.
+    status: "available",
   },
   {
     id: "forms.addCheckbox",
@@ -460,16 +463,55 @@ export const REGISTRY: Command[] = [
     tab: "FORMS",
     group: "Fields",
     keywords: ["form field"],
-    status: UNIMPLEMENTED,
+    status: "available",
+  },
+  {
+    id: "forms.addRadioButton",
+    label: "Add Radio Button",
+    description: "Insert a radio-button option",
+    tab: "FORMS",
+    group: "Fields",
+    keywords: ["form field", "radio group", "option"],
+    status: "available",
+  },
+  {
+    id: "forms.addDropdown",
+    label: "Add Dropdown",
+    description: "Insert a dropdown/choice field",
+    tab: "FORMS",
+    group: "Fields",
+    keywords: ["form field", "combo box", "select"],
+    status: "available",
+  },
+  {
+    id: "forms.addDateField",
+    label: "Add Date Field",
+    description: "Insert a date field",
+    tab: "FORMS",
+    group: "Fields",
+    keywords: ["form field", "date"],
+    status: "available",
   },
   {
     id: "forms.addSignatureField",
     label: "Add Signature Field",
-    description: "Insert a field for a signature",
+    // Deliberately honest: this places a visual placeholder only, not an
+    // interactive/cryptographic signature field — see
+    // FormFieldEngine's docblock. Full signing is a later phase.
+    description: "Insert a placeholder area for a future signature",
     tab: "FORMS",
     group: "Fields",
     keywords: ["form field", "sign here"],
-    status: UNIMPLEMENTED,
+    status: "available",
+  },
+  {
+    id: "forms.clearAll",
+    label: "Clear All Fields",
+    description: "Reset every fillable field's value",
+    tab: "FORMS",
+    group: "Tools",
+    keywords: ["reset form", "clear values"],
+    status: "available",
   },
   {
     id: "forms.detectFields",
@@ -478,6 +520,9 @@ export const REGISTRY: Command[] = [
     tab: "FORMS",
     group: "Tools",
     keywords: ["autodetect"],
+    // Stays unimplemented — reliably detecting candidate fields in an
+    // arbitrary existing PDF isn't achievable with this stack's tools;
+    // not faked (see ARCHITECTURE.md's Phase 10 section).
     status: UNIMPLEMENTED,
   },
 
@@ -881,6 +926,28 @@ export const CONTEXTUAL_COMMANDS: Record<Exclude<SelectionType, "none">, Command
       // stays unavailable here (redundant with the Smart Inspector's own
       // real color controls, same precedent Phase 4 set for text/image);
       // "Reply" stays unavailable since no comment-thread system exists.
+      status: "available",
+    },
+  ],
+  form: [
+    {
+      id: "context.form.duplicate",
+      label: "Duplicate",
+      description: "Duplicate the selected form field",
+      tab: "FORMS",
+      group: "Selected Field",
+      keywords: ["duplicate", "copy"],
+      icon: "duplicate",
+      status: "available",
+    },
+    {
+      id: "context.form.delete",
+      label: "Delete Field",
+      description: "Remove the selected form field",
+      tab: "FORMS",
+      group: "Selected Field",
+      keywords: ["remove field"],
+      icon: "trash",
       status: "available",
     },
   ],
