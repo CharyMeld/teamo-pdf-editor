@@ -3,8 +3,10 @@ import CreatePdfFromImagesDialog from "../components/dialogs/CreatePdfFromImages
 import CropDialog from "../components/dialogs/CropDialog";
 import InsertPageDialog from "../components/dialogs/InsertPageDialog";
 import MergeDialog from "../components/dialogs/MergeDialog";
+import OcrResultsPanel from "../components/dialogs/OcrResultsPanel";
 import OpenDocumentDialog from "../components/dialogs/OpenDocumentDialog";
 import ReplacePageDialog from "../components/dialogs/ReplacePageDialog";
+import RunOcrDialog from "../components/dialogs/RunOcrDialog";
 import SaveAsDialog from "../components/dialogs/SaveAsDialog";
 import SplitDialog from "../components/dialogs/SplitDialog";
 import CommandRibbon from "../components/ribbon/CommandRibbon";
@@ -29,6 +31,8 @@ export default function WorkspacePage() {
       <SaveAsDialog />
       <CropDialog />
       <CreatePdfFromImagesDialog />
+      <RunOcrDialog />
+      <OcrResultsPanel />
     </WorkspaceProviders>
   );
 }

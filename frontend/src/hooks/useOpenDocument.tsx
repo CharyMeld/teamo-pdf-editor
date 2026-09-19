@@ -9,13 +9,13 @@ import {
   type ReactNode,
 } from "react";
 import {
-  documentFileUrl,
   getDocument,
   getDocumentPages,
   getDocumentStatus,
   listDocuments,
   unlockDocument,
   uploadDocument,
+  workingFileUrl,
   type DocumentPageMeta,
   type DocumentSummary,
 } from "../lib/api";
@@ -55,6 +55,21 @@ interface OpenDocumentContextValue {
 
   pdfDoc: PDFDocumentProxy | null;
   pdfLoadError: string | null;
+  /** Re-fetches the real pdf.js document from scratch — for a mutation
+   * that bakes changes directly into page content rather than through an
+   * overlay layer (Phase 7's OCR is the first: see ARCHITECTURE.md's
+   * Phase 7 section on why the load effect below never re-runs on
+   * `working.revision`). Also naturally re-runs the search-index effect
+   * (same `[pdfDoc, document]` dependency), so "search newly-OCR'd text"
+   * falls out of this for free. */
+  reloadPdfDocument: () => void;
+
+  /** Real per-page text content from the search index, exposed for Phase
+   * 7's OCR-results review/copy/extract — built once, here, from pdf.js's
+   * own `getTextContent()`; not a second extraction mechanism. Null while
+   * the index hasn't reached that page yet (still building, or out of
+   * range). */
+  getPageText: (pageNumber: number) => string | null;
 
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -272,11 +287,19 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
   // document is ready — this is what PdfViewer renders from, and what
   // the search index below is built from. One shared instance; nothing
   // else in the app calls getDocument() a second time for the same file.
-  useEffect(() => {
-    if (!document || document.status !== "ready") return;
+  // Loads from `workingFileUrl` (the current working-copy step's file, or
+  // the saved version if there's no pending step) rather than
+  // `documentFileUrl` (always the last SAVE) — identical bytes for every
+  // pre-Phase-7 call path (nothing had committed a step without saving
+  // when this effect fires), but the one that makes `reloadPdfDocument`
+  // actually pick up an OCR job's just-committed text instead of
+  // re-fetching the same pre-OCR bytes forever — a real gap found and
+  // fixed during Phase 7 browser testing, not assumed.
+  const loadPdfDoc = useCallback((): (() => void) => {
+    if (!document || document.status !== "ready") return () => {};
     let cancelled = false;
 
-    loadPdfDocument({ url: documentFileUrl(document.id), password: passwordRef.current })
+    loadPdfDocument({ url: workingFileUrl(document.id), password: passwordRef.current })
       .promise.then((proxy) => {
         if (cancelled) return;
         setPdfDoc(proxy);
@@ -290,9 +313,21 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-    // Re-run only when the open document's identity/status actually changes.
+  }, [document]);
+
+  useEffect(() => {
+    return loadPdfDoc();
+    // Re-run only when the open document's identity/status actually
+    // changes — not on every render `loadPdfDoc` gets a new identity.
+    // A mutation that bakes changes into page content (Phase 7's OCR)
+    // instead calls `reloadPdfDocument()` explicitly once its job
+    // completes — see that callback's docblock above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [document?.id, document?.status]);
+
+  const reloadPdfDocument = useCallback(() => {
+    loadPdfDoc();
+  }, [loadPdfDoc]);
 
   // Build a client-side search index from the loaded pdf.js document —
   // real per-page text content, not a fake count. Yields periodically so
@@ -313,11 +348,25 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
         try {
           const page = await pdfDoc.getPage(n);
           const content = await page.getTextContent();
+          // Collapse whitespace runs to one space: a born-digital PDF
+          // usually stores each line as one text item, but Tesseract's
+          // `pdf` output (and some other PDF producers) positions every
+          // WORD as its own item, each already carrying its own trailing
+          // space — joining those with another literal " " compounds into
+          // multiple spaces, which a normally-typed multi-word search
+          // would then silently miss via plain `indexOf`. Confirmed
+          // empirically during Phase 7 testing: a real OCR'd page indexed
+          // as "hello   ocr   world" (three spaces) never matched a user
+          // typing "hello ocr". Collapsing here (and normalizing the query
+          // the same way in `searchMatches`) fixes it for OCR'd pages
+          // without changing single-text-item pages' matching at all.
           const text = content.items
             .map((item) => ("str" in item ? item.str : ""))
             .join(" ")
-            .toLowerCase();
-          if (text.trim().length > 0) anyText = true;
+            .toLowerCase()
+            .replace(/\s+/g, " ")
+            .trim();
+          if (text.length > 0) anyText = true;
           built.push({ pageNumber: n, text });
         } catch {
           built.push({ pageNumber: n, text: "" });
@@ -336,8 +385,19 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
     };
   }, [pdfDoc, document]);
 
+  const getPageText = useCallback(
+    (pageNumber: number): string | null => {
+      const entry = searchIndex.find((e) => e.pageNumber === pageNumber);
+      return entry ? entry.text : null;
+    },
+    [searchIndex],
+  );
+
   const searchMatches = useMemo<SearchMatch[]>(() => {
-    const needle = searchQuery.trim().toLowerCase();
+    // Same whitespace-collapse as the indexed text above, so a normally-
+    // typed multi-word query still matches an OCR'd page's irregular
+    // per-word spacing.
+    const needle = searchQuery.trim().toLowerCase().replace(/\s+/g, " ");
     if (!needle || searchIndexState !== "ready") return [];
     const matches: SearchMatch[] = [];
     for (const { pageNumber, text } of searchIndex) {
@@ -402,6 +462,8 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
     unlock,
     pdfDoc,
     pdfLoadError,
+    reloadPdfDocument,
+    getPageText,
     searchQuery,
     setSearchQuery,
     searchIndexState,

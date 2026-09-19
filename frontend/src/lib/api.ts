@@ -111,6 +111,17 @@ export function documentFileUrl(id: string): string {
   return `${API_BASE_URL}/documents/${id}/file`;
 }
 
+/** Real bytes of the document's CURRENT state — the pending working-copy
+ * step's file if one exists, otherwise the same saved version
+ * `documentFileUrl` serves. Phase 7 (OCR): `documentFileUrl` only ever
+ * serves the last SAVE, so pdf.js's canvas/search-index reload after an
+ * OCR job commits a step (which doesn't auto-Save) needs this instead —
+ * see `reloadPdfDocument`'s docblock in useOpenDocument and
+ * DocumentEditController::workingFile's docblock server-side. */
+export function workingFileUrl(id: string): string {
+  return `${API_BASE_URL}/documents/${id}/working/file`;
+}
+
 /** URL for a real, pre-rendered page thumbnail — used with
  * `<img crossOrigin="use-credentials">` so the session cookie rides along
  * cross-origin. */
@@ -771,4 +782,58 @@ export async function getScanImagePreviewUrl(sessionId: string, imageId: number)
 export async function createScanPdf(sessionId: string, title: string): Promise<DocumentSummary> {
   const { data } = await api.post<{ document: DocumentSummary }>(`/scan-sessions/${sessionId}/create-pdf`, { title });
   return data.document;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 — OCR: recognizes text on scanned pages and splices it into the
+// working copy as real, extractable page content — see OcrService's
+// docblock. Unlike Phase 3/4/5's synchronous operation endpoints, this
+// runs as a queued job: `startOcr` only enqueues it and returns a job id;
+// callers poll `getOcrJob` for progress and the final `OcrJobSummary`
+// (Phase 3-shaped: pageCount/canUndo/canRedo, reusable via
+// `working.applyOperationResult` directly, plus a per-page `results` list).
+
+export type OcrJobStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
+
+export interface OcrPageResult {
+  page: number;
+  status: "recognized" | "skipped" | "cancelled";
+  reason?: string;
+}
+
+export interface OcrJobSummary {
+  pageCount: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  results: OcrPageResult[];
+}
+
+export interface OcrJobState {
+  status: OcrJobStatus;
+  progressPercent: number | null;
+  errorMessage: string | null;
+  payload: OcrJobSummary | null;
+}
+
+export async function getOcrLanguages(id: string): Promise<string[]> {
+  const { data } = await api.get<{ data: string[] }>(`/documents/${id}/ocr/languages`);
+  return data.data;
+}
+
+export async function startOcr(
+  id: string,
+  pages: number[] | "all",
+  language: string,
+): Promise<{ jobId: number }> {
+  const { data } = await api.post<{ jobId: number }>(`/documents/${id}/ocr`, { pages, language });
+  return data;
+}
+
+export async function getOcrJob(id: string, jobId: number): Promise<OcrJobState> {
+  const { data } = await api.get<OcrJobState>(`/documents/${id}/ocr/jobs/${jobId}`);
+  return data;
+}
+
+export async function cancelOcrJob(id: string, jobId: number): Promise<void> {
+  await api.post(`/documents/${id}/ocr/jobs/${jobId}/cancel`);
 }

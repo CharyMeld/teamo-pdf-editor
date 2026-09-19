@@ -489,7 +489,7 @@ export const REGISTRY: Command[] = [
     tab: "OCR",
     group: "Recognition",
     keywords: ["scan", "recognize text", "searchable pdf"],
-    status: UNIMPLEMENTED,
+    status: "available",
   },
   {
     id: "ocr.language",
@@ -498,7 +498,7 @@ export const REGISTRY: Command[] = [
     tab: "OCR",
     group: "Recognition",
     keywords: ["language pack"],
-    status: UNIMPLEMENTED,
+    status: "available",
   },
   {
     id: "ocr.reviewResults",
@@ -507,7 +507,7 @@ export const REGISTRY: Command[] = [
     tab: "OCR",
     group: "Recognition",
     keywords: ["proofread"],
-    status: UNIMPLEMENTED,
+    status: "available",
   },
 
   // ---- CONVERT --------------------------------------------------------------

@@ -8,6 +8,7 @@ import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useWorkingDocument } from "../../hooks/useWorkingDocument";
+import { useOcrWorkflow } from "../../ocr/useOcrWorkflow";
 import { useScanWorkflow } from "../../scanning/useScanWorkflow";
 import IconButton from "../ui/IconButton";
 import CommandGroup from "./CommandGroup";
@@ -54,11 +55,12 @@ export default function CommandRibbon() {
   const { activeTab, setActiveTab } = useActiveTab();
   const { selection } = useSelectionContext();
   const view = useDocumentViewState();
-  const { showOpenDialog } = useOpenDocument();
+  const { document: doc, showOpenDialog } = useOpenDocument();
   const organize = useOrganizeRunHandlers();
   const contentEditor = useContentEditorRunHandlers();
   const annotations = useAnnotationRunHandlers();
   const scanWorkflow = useScanWorkflow();
+  const ocrWorkflow = useOcrWorkflow();
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const [sheetOpen, setSheetOpen] = useState(false);
   useUndoRedoShortcuts();
@@ -78,13 +80,19 @@ export default function CommandRibbon() {
     "view.prevPage": view.goToPrevPage,
     "home.open": showOpenDialog,
     "convert.fromImage": scanWorkflow.openDialog,
+    "ocr.run": ocrWorkflow.openDialog,
+    "ocr.language": ocrWorkflow.openDialog,
+    "ocr.reviewResults": ocrWorkflow.openResults,
     ...organize.runHandlers,
     ...contentEditor.runHandlers,
     ...annotations.runHandlers,
   };
+  const documentReady = !!doc && doc.status === "ready";
   const disabledReasons: Record<string, string> = {
     ...(view.canGoNext ? {} : { "view.nextPage": "No document open" }),
     ...(view.canGoPrev ? {} : { "view.prevPage": "No document open" }),
+    ...(documentReady ? {} : { "ocr.run": "No document open", "ocr.language": "No document open" }),
+    ...(ocrWorkflow.summary ? {} : { "ocr.reviewResults": "Run OCR first" }),
     ...organize.disabledReasons,
     ...contentEditor.disabledReasons,
     ...annotations.disabledReasons,

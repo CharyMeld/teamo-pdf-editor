@@ -1885,3 +1885,209 @@ boundary — no "Scan from device" UI exists). A dedicated UI-level drag-
 reorder test in this session specifically (see above — the underlying
 mechanism is Phase 3's own proven one, exercised directly via the API
 instead). No OCR, conversion, compression, signing, AI, or forms.
+
+## Phase 7 (backend) — OCR and searchable documents (2026-09-19)
+
+OCR's "Run OCR" is now real: recognizes text on scanned pages (current
+page / selected pages / entire document), leaves any page that already
+has real text **completely untouched**, and splices each recognized
+page back into the working copy as a genuine, extractable text layer —
+reusing **100% of Phase 3's real page-splice mechanism**, not a parallel
+one. `OcrService::processPage()` builds the exact same `{path, range}`
+triple `PageOperationService::replace()` already builds (pages before +
+the recognized single-page PDF + pages after) and calls the same
+`PdfPageEngine::compose()` + `WorkingCopyManager::commitStep('ocr_process', ...)`
+Phase 3/4/5 all share — one `document_edit_operations` step per OCR'd
+page, giving OCR real undo/redo with zero new history concept.
+
+### Runs page-by-page, not as one batch — real cancellation
+
+Unlike Phase 3/4/5/6's synchronous single-request operations, an OCR run
+can be genuinely slow (many pages, each a real `pdftoppm` rasterize +
+`tesseract` recognize), so it's a queued job (`RunOcr`) polled via
+`document_jobs`, following `DocumentThumbnailRenderer`'s exact
+`progress_percent` convention. `document_jobs` had **zero cancellation
+support anywhere in the codebase** before this (confirmed: no
+`cancel`/`cancelled` match in `app/`) — a small migration widens `status`
+to include `'cancelled'` and adds a `cancel_requested` boolean.
+`OcrService::run()` refreshes the job and checks `cancel_requested`
+*between* pages, never mid-page, so a cancelled run's already-committed
+steps stay committed and undo-able — verified directly: cancelling a
+5-page run after ~1.5s left exactly 2 real `ocr_process` steps in
+`document_edit_operations`, `canUndo: true`, and pages 3-5 confirmed
+byte-for-byte untouched (still no extractable text) via `pdftotext`.
+
+### Mixed scanned/text documents behave correctly
+
+`OcrEngine::hasExistingText()` (`pdftotext -f N -l N` + a length
+threshold) gates every page before any rasterization happens — a page
+that already has real text is never rerastered, never re-OCR'd, and
+never touched. Verified with a real 3-page test document (real-text,
+scanned, real-text): OCR on "all" pages produced
+`[skipped: already contains text, recognized, skipped: already contains
+text]`, and the two untouched pages' extracted text was byte-identical
+before/after.
+
+### Tesseract — confirmed real, verified empirically before wiring in
+
+Tesseract 5.3.4 confirmed installed (`tesseract --list-langs` →
+`eng` only — reported honestly via `OcrEngine::installedLanguages()`,
+same "no wishful list" principle as Phase 4's `AVAILABLE_FONTS` and
+Phase 6's Imagick check). Before wiring `tesseract ... pdf txt` into the
+splice pipeline, its `pdf` output mode was verified directly, not
+assumed: a real 300 DPI rasterized test page, run through tesseract,
+produced a single-page PDF that (a) `pdftotext` extracts real, correct,
+positioned text from, (b) passes `qpdf --check` clean, and (c) reports
+**identical `pdfinfo` point dimensions to the source page** (tesseract
+sizes its output from the source PNG's embedded DPI metadata) — all
+three confirmed before any splice code was written.
+
+### API
+
+Four routes under `/documents/{document}/ocr...`: `GET .../ocr/languages`
+(real installed languages), `POST .../ocr` (`{pages: number[] | 'all',
+language}` → `{jobId}`, always queued via `RunOcr`), `GET
+.../ocr/jobs/{job}` (`{status, progressPercent, errorMessage, payload}`
+— `payload` is the same `{pageCount, canUndo, canRedo, results}` shape
+`working.applyOperationResult` already consumes, plus a per-page
+`results` list), `POST .../ocr/jobs/{job}/cancel` (sets
+`cancel_requested`; refused once the job has already finished).
+
+### A second endpoint this phase's testing forced into existence: `working/file`
+
+`DocumentController::file()` only ever serves `currentVersion` — the
+last **Save** — never a pending working-copy step. Every prior phase's
+edits never needed the actual pdf.js canvas to reflect a pending step
+because they render through independent overlay layers (see the
+frontend section below); OCR is the first to bake changes directly into
+page content, so a real browser test of "does Search find OCR'd text in
+this session" surfaced the gap live: after an OCR job completed, the
+canvas kept showing the pre-OCR file. `DocumentEditController::workingFile()`
+(`GET .../working/file`) serves `WorkingCopyManager::currentAbsolutePath()`
+instead — the pending step's file if one exists, otherwise identical
+bytes to `file()` — with **`Cache-Control: no-store`** explicitly
+overriding `response()->file()`'s default `public` (paired with a
+`Last-Modified` the browser otherwise treats as heuristically
+cacheable). Both fixes were necessary and verified independently: with
+the new endpoint but the default cache header, the reload's fetch was
+still served from Chrome's HTTP cache with the stale pre-OCR bytes even
+though the on-disk file was already correct — caught via Playwright
+network inspection, not assumed away.
+
+### Verified working (2026-09-19)
+
+Against the live `php artisan serve` + 2×`queue:work` stack, via direct
+`curl` with a real Sanctum session plus real generated test PDFs (a
+clean single-scanned-page doc, a 3-page mixed scanned/text doc, a
+5-page all-scanned doc): a clean OCR run producing real, `pdftotext`-
+extractable, `qpdf --check`-clean, dimension-correct text; the mixed
+document's skip/recognize/skip result exactly as designed; a mid-run
+cancellation leaving partial, undo-able progress intact; and the
+resulting `document_edit_operations` rows/payloads inspected directly
+in the database, never trusted from the API response alone.
+
+### What Phase 7 (backend) does NOT include
+
+The frontend (delivered in the same session — see below). Handwriting
+recognition or non-Latin/non-`eng` languages (only `eng` is installed on
+this host; `installedLanguages()` will report more the moment more
+`tessdata` packages are). OCR correction/editing UI beyond copy/
+download (see Review Results below — it's read-only). No conversion,
+compression, signing, AI, or forms.
+
+## Phase 7 (frontend) — real OCR UI + two real cross-cutting bugs found and fixed (2026-09-19)
+
+Wires the OCR tab's three commands (`ocr.run`, `ocr.language`,
+`ocr.reviewResults`) to a new `useOcrWorkflow` provider
+(`frontend/src/ocr/`), following `useScanWorkflow`'s shape but — unlike
+scanning — deliberately **not** independent: it reads
+`useOpenDocument`/`useWorkingDocument`/`usePageSelection` directly, since
+a recognized page joins the same working-copy chain Phase 3/4/5 already
+share. `RunOcrDialog` (scope radios: current page / selected pages /
+entire document; language dropdown; a real percentage progress bar —
+the first job in the app polling genuine per-page progress rather than a
+readiness boolean; Cancel; a per-page result summary) and
+`OcrResultsPanel` (behind Review Results: per-page text, copy-per-page,
+copy-all, download-as-`.txt`) round out the UI. No new text-extraction
+mechanism: both are built from `useOpenDocument`'s existing pdf.js
+`getTextContent()`-based search index, newly exposed via a
+`getPageText(pageNumber)` accessor.
+
+### The gap this phase's plan predicted, confirmed real by testing
+
+`useOpenDocument`'s pdf.js-loading effect re-runs only on
+`[document?.id, document?.status]` — never on a working-copy mutation.
+Phases 4/5/6 never hit this because their edits render through
+independent overlay layers (`ContentObjectLayer`/`AnnotationLayer`), so
+the canvas never needed to reflect them directly. OCR bakes real
+invisible text into actual page content, so `useOpenDocument` gained a
+`reloadPdfDocument()` callback (the load effect's body, extracted;
+called once an OCR job's poller sees `completed`/`cancelled`) — which
+also naturally reruns the search-index effect (same `[pdfDoc, document]`
+dependency), so "search newly-OCR'd text" falls out of the *existing*
+search feature rather than new code, exactly as planned.
+
+### Two further, real bugs this same fix's own browser testing surfaced (not predicted, found empirically)
+
+1. **Wrong URL.** `reloadPdfDocument()` initially re-fetched
+   `documentFileUrl()` — the last-**Save** endpoint — so it kept loading
+   the exact same pre-OCR bytes no matter how many times it "reloaded."
+   Fixed by loading from the new `workingFileUrl()` (`GET
+   .../working/file`, backend section above) instead, for **every**
+   pdf.js load, not just OCR's reload — provably safe for every earlier
+   phase, since at initial-load time (the only time the effect fires for
+   them) there is never yet a pending step, so the two URLs return
+   identical bytes.
+2. **Browser HTTP caching.** Even after switching URLs, a *second*
+   fetch of the identical `/working/file` URL was served from Chrome's
+   own HTTP cache with the stale pre-OCR bytes — invisible from the
+   Network tab's status code (still "200") but confirmed via direct
+   response-body inspection in a Playwright test. Fixed server-side with
+   `Cache-Control: no-store` (see backend section).
+
+Both were caught only because this phase's plan explicitly required
+testing the promise "Search finds OCR'd text in the same session" as a
+real browser assertion rather than trusting the job's `completed`
+status alone — exactly the kind of gap the plan's own docblock warned
+would be silent otherwise.
+
+### A third, smaller but real bug: multi-word search vs. OCR'd text's per-word spacing
+
+Once the reload genuinely picked up new bytes, a single-word search
+(`"Hello"`) found the OCR'd page immediately — but a normally-typed
+two-word search (`"Hello OCR"`) did not. Cause, confirmed via direct
+per-page text logging: a born-digital PDF (Phase 6's synthetic test
+pages) stores a whole line as one pdf.js text item, so
+`useOpenDocument`'s `.join(" ")` produces normal single-spaced text —
+but Tesseract's `pdf` output positions **every word** as its own text
+item, each already carrying its own trailing space, so joining with
+another literal space compounded into `"hello   ocr   world"` (three
+spaces). Fixed by collapsing whitespace runs to one space on both the
+indexed text and the search query (`.replace(/\s+/g, " ")` in both
+places) — a one-line fix that doesn't change matching for any existing
+single-text-item page, confirmed by re-running the same single-word
+searches afterward with identical (still-passing) results.
+
+### Testing
+
+Playwright against `google-chrome-stable` (per this project's established
+technique), driven against the real live stack end-to-end: uploaded a
+real 3-page mixed scanned/text PDF through the actual Open dialog;
+switched to the OCR tab; ran OCR with "Entire document" scope; watched
+the real per-page result summary (`skipped / recognized / skipped`)
+render in `RunOcrDialog`; closed it; typed `"Hello"`, `"OCR"`, and
+`"Hello OCR"` into the existing Search box and confirmed all three found
+the newly-recognized page **in the same session, with no manual
+reload** — the specific end-to-end promise this phase's plan set out to
+verify. Screenshot-confirmed throughout. Separately verified a mid-run
+Cancel via direct API polling (see backend section) since a UI-level
+race on a 5-page cancel window is impractical to script reliably.
+
+### What Phase 7 (frontend) does NOT include
+
+OCR text correction/editing (Review Results is read-only: copy and
+download only, per the plan's explicit scope). A dedicated UI-level
+cancel-button test (verified at the API level instead — see backend
+section — for the same reliable-timing reason noted in Phase 6's
+frontend section for drag-reorder). No conversion, compression, signing,
+AI, or forms.

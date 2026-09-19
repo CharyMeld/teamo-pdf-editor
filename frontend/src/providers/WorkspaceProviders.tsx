@@ -8,6 +8,7 @@ import { OpenDocumentProvider } from "../hooks/useOpenDocument";
 import { PageSelectionProvider } from "../hooks/usePageSelection";
 import { PanelVisibilityProvider } from "../hooks/usePanelVisibility";
 import { WorkingDocumentProvider } from "../hooks/useWorkingDocument";
+import { OcrWorkflowProvider } from "../ocr/useOcrWorkflow";
 import { ScanWorkflowProvider } from "../scanning/useScanWorkflow";
 
 /** Composes the workspace's shared state providers in one place so
@@ -34,7 +35,12 @@ export default function WorkspaceProviders({ children }: { children: ReactNode }
                 <ContentObjectsProvider>
                   <AnnotationsProvider>
                     <PageSelectionProvider>
-                      <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                      {/* Phase 7 (OCR): needs the open document, working
+                          copy (applyOperationResult), and page selection —
+                          sits inside all three for that reason. */}
+                      <OcrWorkflowProvider>
+                        <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                      </OcrWorkflowProvider>
                     </PageSelectionProvider>
                   </AnnotationsProvider>
                 </ContentObjectsProvider>
