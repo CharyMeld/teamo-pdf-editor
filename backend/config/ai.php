@@ -16,4 +16,17 @@ return [
         // 'openai' => \App\Domain\Ai\Providers\OpenAiProvider::class,
         // 'google' => \App\Domain\Ai\Providers\GoogleProvider::class,
     ],
+
+    // Identifier => display name. A DISPLAY/VALIDATION CATALOG ONLY
+    // (Phase 12.3) — deliberately separate from `providers` above.
+    // Lets the settings UI accept and store credentials for a provider
+    // before its adapter exists; testing a stored credential for a
+    // provider not yet in `providers` honestly returns
+    // AiConnectionStatus::ProviderUnavailable, never a fake success. No
+    // network call to any of these happens anywhere in this config.
+    'known_providers' => [
+        'anthropic' => 'Anthropic Claude',
+        'openai' => 'OpenAI',
+        'google' => 'Google Gemini',
+    ],
 ];

@@ -23,14 +23,23 @@ use App\Exceptions\AiException;
  * AI subsystem fails the same clear way (AiException::providerUnavailable())
  * no matter which method was called, rather than each call site having
  * to remember to check first.
+ *
+ * `isEnabled()` delegates to AiSettingsService (Phase 12.3), which
+ * falls back to `config('ai.enabled')` when no runtime setting has
+ * been saved yet — this is why Phase 12.2's AiServiceTest (which sets
+ * `config(['ai.enabled' => ...])` directly and never touches the
+ * `settings` table) still passes unmodified.
  */
 class AiService
 {
-    public function __construct(private readonly AiProviderRegistry $registry) {}
+    public function __construct(
+        private readonly AiProviderRegistry $registry,
+        private readonly AiSettingsService $settings,
+    ) {}
 
     public function isEnabled(): bool
     {
-        return (bool) config('ai.enabled', false);
+        return $this->settings->isAiEnabled();
     }
 
     /** @return list<string> */

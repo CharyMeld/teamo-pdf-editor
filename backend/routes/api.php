@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AiSettingsController;
 use App\Http\Controllers\Api\CompressionController;
 use App\Http\Controllers\Api\ConversionController;
 use App\Http\Controllers\Api\DevAuthController;
@@ -159,4 +160,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/{document}/compressions/jobs/{job}', [CompressionController::class, 'show']);
     Route::get('/documents/{document}/compressions/jobs/{job}/download', [CompressionController::class, 'download']);
     Route::post('/documents/{document}/compressions/jobs/{job}/replace', [CompressionController::class, 'replace']);
+
+    // Phase 12.3 (AI provider settings): enable/disable AI, enable/
+    // disable external processing, default provider, and per-provider
+    // credential storage/testing — see AiSettingsController's docblock.
+    // Not document-scoped (no {document} param) since these are
+    // account-level settings, unlike every route above. No provider
+    // adapter exists yet (Phase 12.4+), so testConnection here always
+    // honestly reports PROVIDER_UNAVAILABLE.
+    Route::get('/ai/settings', [AiSettingsController::class, 'show']);
+    Route::patch('/ai/settings', [AiSettingsController::class, 'update']);
+    Route::put('/ai/settings/providers/{provider}/credentials', [AiSettingsController::class, 'storeCredential']);
+    Route::delete('/ai/settings/providers/{provider}/credentials', [AiSettingsController::class, 'destroyCredential']);
+    Route::post('/ai/settings/providers/{provider}/test', [AiSettingsController::class, 'testConnection']);
 });

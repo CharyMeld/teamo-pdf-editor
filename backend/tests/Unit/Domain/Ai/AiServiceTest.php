@@ -8,6 +8,7 @@ use App\Domain\Ai\Enums\AiConnectionStatus;
 use App\Domain\Ai\Enums\AiErrorCode;
 use App\Domain\Ai\Services\AiService;
 use App\Exceptions\AiException;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\Support\FakeAiProvider;
 use Tests\TestCase;
 
@@ -18,9 +19,20 @@ use Tests\TestCase;
  * Proves the two properties the spec explicitly requires: the app
  * works with AI completely disabled, and provider errors never leak a
  * raw credential.
+ *
+ * Uses DatabaseTransactions (added in Phase 12.3): AiService::isEnabled()
+ * now reads through AiSettingsService, which checks the `settings`
+ * table before falling back to `config('ai.enabled')` — without this
+ * trait, a real row left in this project's shared dev database (there
+ * is no separate test DB, see phpunit.xml) would shadow every
+ * `config(['ai.enabled' => ...])` call below. Caught exactly this way:
+ * a leftover `ai.enabled` row from manual smoke-testing broke these
+ * tests until cleaned up and this trait was added.
  */
 class AiServiceTest extends TestCase
 {
+    use DatabaseTransactions;
+
     protected function setUp(): void
     {
         parent::setUp();

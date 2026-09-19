@@ -16,15 +16,19 @@ OpenAI, Google, and others as they're added), never a local model.
 > warnings (12.13) and prompt-injection defense (12.11), and no
 > provider-specific code exists outside this module's own adapters.
 
-**Owns:** No tables yet. Enable/disable, default provider, and
-credentials will live in the existing (currently unused) `settings`
-table — see the Settings module — once Phase 12.3 builds that surface;
-this phase (12.2) added no schema.
+**Owns:** `ai_provider_credentials` table (`App\Models\AiProviderCredential`,
+Phase 12.3 — `api_key` encrypted at rest via the model's `encrypted`
+cast). Enable/disable, external-processing toggle, and default
+provider live in the Settings module's `settings` table via
+`Services\AiSettingsService` — the first real usage of that
+previously-unused table.
 
 **Exposes:** `Services\AiService` — the single call-through point every
 future controller/job uses; nothing outside this module should
 reference `Services\AiProviderRegistry`, `config('ai.providers')`, or
 any `Contracts\AiProviderInterface` implementation directly.
+`Services\AiCredentialService`/`Services\AiSettingsService` are the
+only code allowed to read/write this module's own tables/settings keys.
 `Exceptions\AiException` (in `app/Exceptions/`, alongside every other
 domain's exception, per the project's existing convention) is the only
 form a provider failure takes outside this module — see its own
@@ -48,3 +52,16 @@ or a provider identifier isn't registered, which is what makes "the
 app works with AI completely disabled" a real, tested property (see
 `tests/Unit/Domain/Ai/AiServiceTest.php`) rather than just an absence
 of UI. Anthropic (Phase 12.4) is the first real adapter to be added.
+
+**Phase 12.3 status:** Real settings surface: `Services\AiSettingsService`
+(enabled/external-processing/default-provider, backed by `settings`)
+and `Services\AiCredentialService` (per-provider credential CRUD +
+connection-test recording, backed by `ai_provider_credentials`) plus
+`Http\Controllers\Api\AiSettingsController` and a matching AI Settings
+dialog in the frontend. `config('ai.known_providers')` is a
+display/validation catalog (Anthropic/OpenAI/Google), separate from
+`config('ai.providers')`'s adapter map — a credential can be stored for
+a provider before its adapter exists; testing it honestly reports
+`PROVIDER_UNAVAILABLE` rather than a fake success (verified live).
+`AiService::isEnabled()` now delegates to `AiSettingsService`, falling
+back to `config('ai.enabled')` when no runtime setting has been saved.
