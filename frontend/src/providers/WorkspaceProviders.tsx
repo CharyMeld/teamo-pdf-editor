@@ -12,6 +12,7 @@ import { PanelVisibilityProvider } from "../hooks/usePanelVisibility";
 import { WorkingDocumentProvider } from "../hooks/useWorkingDocument";
 import { CompressionWorkflowProvider } from "../compression/useCompressionWorkflow";
 import { ConversionWorkflowProvider } from "../conversion/useConversionWorkflow";
+import { DocumentLibraryProvider } from "../documents/useDocumentLibrary";
 import { OcrWorkflowProvider } from "../ocr/useOcrWorkflow";
 import { ScanWorkflowProvider } from "../scanning/useScanWorkflow";
 
@@ -26,55 +27,58 @@ import { ScanWorkflowProvider } from "../scanning/useScanWorkflow";
  * (see usePageSelection's docblock). */
 export default function WorkspaceProviders({ children }: { children: ReactNode }) {
   return (
-    // Phase 12.3 (AI settings): account-level, not document-scoped — no
-    // dependency on anything else in this tree, so it sits outermost,
-    // alongside ScanWorkflowProvider's own "no dependency" reasoning.
+    // Phase 12.3 (AI settings) and Phase 13 (document library): both
+    // account-level, not document-scoped — no dependency on anything
+    // else in this tree, so they sit outermost, alongside
+    // ScanWorkflowProvider's own "no dependency" reasoning.
     <AiSettingsProvider>
-      <ActiveTabProvider>
-        {/* No dependency on any other provider here (Phase 6's scan/import
-            workflow creates a brand-new document, independent of whatever is
-            currently open) — placement outside the rest is arbitrary, not
-            load-bearing. */}
-        <ScanWorkflowProvider>
-          <SelectionProvider>
-            <DocumentViewProvider>
-              <OpenDocumentProvider>
-                <WorkingDocumentProvider>
-                  <ContentObjectsProvider>
-                    <AnnotationsProvider>
-                      {/* Phase 10 (forms): a third, independent sibling
-                          chain to content objects/annotations above — same
-                          dependency shape (open document, working copy,
-                          selection). */}
-                      <FormFieldsProvider>
-                        <PageSelectionProvider>
-                          {/* Phase 7 (OCR): needs the open document, working
-                              copy (applyOperationResult), and page selection —
-                              sits inside all three for that reason. */}
-                          <OcrWorkflowProvider>
-                            {/* Phase 8 (conversion): same dependency shape as
-                                OCR — the open document, working copy
-                                (pageCount), and page selection (images-format
-                                scope). */}
-                            <ConversionWorkflowProvider>
-                              {/* Phase 9 (compression): only needs the open
-                                  document + working copy (applyOperationResult
-                                  for "replace") — no page selection. */}
-                              <CompressionWorkflowProvider>
-                                <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
-                              </CompressionWorkflowProvider>
-                            </ConversionWorkflowProvider>
-                          </OcrWorkflowProvider>
-                        </PageSelectionProvider>
-                      </FormFieldsProvider>
-                    </AnnotationsProvider>
-                  </ContentObjectsProvider>
-                </WorkingDocumentProvider>
-              </OpenDocumentProvider>
-            </DocumentViewProvider>
-          </SelectionProvider>
-        </ScanWorkflowProvider>
-      </ActiveTabProvider>
+      <DocumentLibraryProvider>
+        <ActiveTabProvider>
+          {/* No dependency on any other provider here (Phase 6's scan/import
+              workflow creates a brand-new document, independent of whatever is
+              currently open) — placement outside the rest is arbitrary, not
+              load-bearing. */}
+          <ScanWorkflowProvider>
+            <SelectionProvider>
+              <DocumentViewProvider>
+                <OpenDocumentProvider>
+                  <WorkingDocumentProvider>
+                    <ContentObjectsProvider>
+                      <AnnotationsProvider>
+                        {/* Phase 10 (forms): a third, independent sibling
+                            chain to content objects/annotations above — same
+                            dependency shape (open document, working copy,
+                            selection). */}
+                        <FormFieldsProvider>
+                          <PageSelectionProvider>
+                            {/* Phase 7 (OCR): needs the open document, working
+                                copy (applyOperationResult), and page selection —
+                                sits inside all three for that reason. */}
+                            <OcrWorkflowProvider>
+                              {/* Phase 8 (conversion): same dependency shape as
+                                  OCR — the open document, working copy
+                                  (pageCount), and page selection (images-format
+                                  scope). */}
+                              <ConversionWorkflowProvider>
+                                {/* Phase 9 (compression): only needs the open
+                                    document + working copy (applyOperationResult
+                                    for "replace") — no page selection. */}
+                                <CompressionWorkflowProvider>
+                                  <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                                </CompressionWorkflowProvider>
+                              </ConversionWorkflowProvider>
+                            </OcrWorkflowProvider>
+                          </PageSelectionProvider>
+                        </FormFieldsProvider>
+                      </AnnotationsProvider>
+                    </ContentObjectsProvider>
+                  </WorkingDocumentProvider>
+                </OpenDocumentProvider>
+              </DocumentViewProvider>
+            </SelectionProvider>
+          </ScanWorkflowProvider>
+        </ActiveTabProvider>
+      </DocumentLibraryProvider>
     </AiSettingsProvider>
   );
 }

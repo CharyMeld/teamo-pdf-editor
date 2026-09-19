@@ -3,6 +3,7 @@ import { useSelectionContext } from "../../commands/useSelectionContext";
 import { useActiveTab } from "../../hooks/useActiveTab";
 import { useAnnotationRunHandlers } from "../../hooks/useAnnotationRunHandlers";
 import { useContentEditorRunHandlers } from "../../hooks/useContentEditorRunHandlers";
+import { useDocumentManagementRunHandlers } from "../../hooks/useDocumentManagementRunHandlers";
 import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useFormRunHandlers } from "../../hooks/useFormRunHandlers";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
@@ -65,6 +66,7 @@ export default function CommandRibbon() {
   const annotations = useAnnotationRunHandlers();
   const forms = useFormRunHandlers();
   const signatures = useSignatureRunHandlers();
+  const documentManagement = useDocumentManagementRunHandlers();
   const scanWorkflow = useScanWorkflow();
   const ocrWorkflow = useOcrWorkflow();
   const conversionWorkflow = useConversionWorkflow();
@@ -104,6 +106,7 @@ export default function CommandRibbon() {
     ...annotations.runHandlers,
     ...forms.runHandlers,
     ...signatures.runHandlers,
+    ...documentManagement.runHandlers,
   };
   const documentReady = !!doc && doc.status === "ready";
   const disabledReasons: Record<string, string> = {
@@ -127,6 +130,7 @@ export default function CommandRibbon() {
     ...annotations.disabledReasons,
     ...forms.disabledReasons,
     ...signatures.disabledReasons,
+    ...documentManagement.disabledReasons,
   };
 
   return (

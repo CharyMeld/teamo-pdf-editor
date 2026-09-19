@@ -3105,3 +3105,137 @@ before sending document content (Phase 12.13). Multi-user credential
 isolation beyond the schema already supporting it (`user_id` on
 `ai_provider_credentials` — this app still has exactly one seeded
 user). Any document content handling of any kind.
+
+**Phase 12 is closed here by explicit decision (2026-09-19)** — 12.4+
+(a real provider, document context, the AI workspace, etc.) will not
+be pursued unless explicitly requested again. Before 12.4 could start,
+a revised brief asked for OAuth-style "Connect your Claude/OpenAI/
+Google subscription" flows instead of API keys; live research
+confirmed all three providers actively banned exactly that pattern
+(subscription-OAuth passthrough to third-party apps) in 2026, making
+it a real ToS violation to build, not just an unsupported feature. See
+[[phase12_ai_findings]] (project memory) for the full research and
+sourcing.
+
+## Phase 13 — Document management (2026-09-19)
+
+Recent/search/rename/delete/duplicate/download, metadata, version
+history, processing history, and per-user access control for the
+document collection as a whole — distinct from every prior phase's
+concern, which was always the *contents* of one already-open document.
+
+**Almost everything this phase needed already existed, just unused or
+partially used** — the real work was mostly wiring, not new capability:
+
+- `GET /documents` (`DocumentController::index()`) already listed the
+  user's documents; the frontend already called it
+  (`listDocuments()`) to render a basic quick-pick inside the existing
+  `OpenDocumentDialog`. That quick-pick is untouched; this phase adds
+  the actual management surface the ribbon already had a distinct,
+  still-unimplemented command for (`home.recent`) — a new
+  `RecentDocumentsDialog`, not a redesign of the existing picker.
+- `useOpenDocument().openExisting(id)` already opened a previously-
+  uploaded document by id (used internally by Save As/merge/split's
+  "open the result" affordances) — reused verbatim for the new
+  dialog's "Open" action.
+- `Document` already had `SoftDeletes` (Eloquent already excludes
+  trashed rows from every query — "Delete" needed zero new exclusion
+  logic) and an `archived` status value nothing wrote to yet.
+- `WorkingCopyManager::createDocumentFromFile()` (built for Phase 6/8's
+  "images/office → new PDF" flows) is the exact primitive "Duplicate"
+  needed — feed it the source document's current version's file path
+  and a `"{title} (copy)"` title; zero new engine code.
+- `DocumentVersion`/`DocumentJob` already held real version and
+  processing-job history per document — "Version History"/"Processing
+  History" are new *read* endpoints over existing data, not new schema.
+
+**No new migration anywhere in this phase.**
+
+### Backend
+
+`Document::lifecycleState(): string` — a new, purely presentational
+accessor, deliberately kept separate from the real `status` column
+(which still governs ingest/processing exactly as every prior phase
+built it): `uploading`/`validating`/`processing` → `processing`,
+`failed`/`archived`/`password_protected` pass through, and for `ready`:
+pending edits → `working`; more than one saved version → `saved`;
+else `original`. Added to `Document::toSummaryArray()` (the one
+serialization shape every endpoint already funnels through — Phase 6
+found and reused this first) alongside a plain `updatedAt`.
+
+New `DocumentController` methods, all starting with the controller's
+own existing `authorizeOwner()` (a private method already on this
+class — note this class has its own copy, not the shared
+`AuthorizesDocumentAccess` trait `DocumentContentController`/
+`DocumentAnnotationController` use, so no trait was pulled in here to
+avoid a name collision): `update()` (rename), `destroy()` (soft
+delete), `duplicate()`, `download()` (a real attachment response via
+`response()->download()` — `file()` itself stays untouched, since the
+PDF viewer needs its existing inline behavior), `archive()`/
+`unarchive()` (only from `ready`↔`archived`), `versions()`, `history()`.
+`index()` gained an optional `?q=` search over title/filename; its
+no-param behavior is unchanged for every existing caller.
+
+**Access control**: every new endpoint reuses the same `authorizeOwner()`
+every existing document endpoint already uses — no new auth system,
+no new multi-user UI. This is the concrete, honest way this phase
+"prepares for multiple users" per its own brief's wording: every query
+and mutation is already `user_id`-scoped; nothing new bypasses that.
+
+### Testing
+
+44 backend tests now pass (28 from Phase 12.2/12.3 + 5 new
+`lifecycleState()` mapping tests + 11 new controller tests, including
+ownership-violation → 403 for every new endpoint). **A real cleanup
+bug caught only by measuring, not assuming**: the test class's
+`tearDown()` initially deleted only `dirname($path)` (e.g.
+`{uuid}/versions/1`), leaving the empty `{uuid}/` directory itself
+behind on every run — confirmed by literally counting
+`storage/app/private/documents/*` before and after a run (146 → 159
+after 11 tests). Fixed by deleting the top-level UUID directory
+instead. **Reusable lesson: when a test's teardown deletes files, verify
+by measuring directory counts before/after, not by trusting the
+cleanup code's own logic looks right.**
+
+### Frontend
+
+`useDocumentLibrary.tsx` (new provider, account-level like
+`AiSettingsProvider` — no dependency on anything else in
+`WorkspaceProviders.tsx`) backs two new dialogs: `RecentDocumentsDialog`
+(search, inline blur-to-commit rename, Duplicate/Download/Archive-
+Unarchive, and a two-click inline arm/confirm for Delete — deleting a
+whole document, with all its versions/history, is materially
+higher-stakes than this app's existing single-object deletes, which
+commit immediately with zero confirmation anywhere else in the app)
+and `DocumentPropertiesDialog` (metadata + real Version History +
+Processing History for the *currently open* document). `home.recent`/
+`home.properties`/`home.close` all flip from unavailable to real —
+`home.close` needed no new logic at all, just wiring the
+already-implemented `useOpenDocument().closeDocument()` to the ribbon.
+
+Verified end-to-end via Playwright against the live stack: search,
+inline rename (confirmed via the real PATCH response), duplicate
+(confirmed the copy genuinely processes independently and reaches
+`ready`), download (confirmed a real `Content-Disposition: attachment`
+response), archive → unarchive round-trip, the two-click delete
+confirm, Document Properties showing real version/processing history,
+and Close returning to the empty "no document open" state.
+
+**Two real test-authoring mistakes found and fixed while verifying,
+neither a product bug**: a Playwright locator using `.filter({ hasText })`
+against a row containing a controlled `<input>` never matches, because
+`hasText` checks `textContent` and an input's `value` isn't a text
+node — fixed by locating via `input[value="..."]` instead. And a
+`.filter({ hasText: "Renamed by Playwright" })` also matched
+"Renamed by Playwright (copy)" (same substring), picking the
+still-processing copy's disabled Archive button — fixed by matching
+the exact input value instead of a substring.
+
+### What Phase 13 does NOT include
+
+Any new authentication/registration system (this app still has one
+seeded dev user — "prepare for" multiple users means consistent
+`user_id` scoping, already true). A "client/project" grouping concept
+(explicitly deferred as *future* in the phase's own brief). Any change
+to the real `status` column's meaning or values. Full security
+auditing (Phase 14's explicit job).

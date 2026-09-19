@@ -60,25 +60,29 @@ export const REGISTRY: Command[] = [
     tab: "HOME",
     group: "Document",
     keywords: ["exit document"],
-    status: UNIMPLEMENTED,
+    // Real as of Phase 13 — useOpenDocument.closeDocument() already
+    // existed (used internally by other flows); this just exposes it.
+    status: "available",
   },
   {
     id: "home.recent",
     label: "Recent Documents",
-    description: "Browse recently opened documents",
+    description: "Browse, search, rename, duplicate, download, archive, or delete your documents",
     tab: "HOME",
     group: "Recent",
-    keywords: ["history", "last opened"],
-    status: UNIMPLEMENTED,
+    keywords: ["history", "last opened", "search documents", "manage documents"],
+    // Real as of Phase 13 — see RecentDocumentsDialog / useDocumentLibrary.
+    status: "available",
   },
   {
     id: "home.properties",
     label: "Document Properties",
-    description: "View title, author, and file details",
+    description: "View title, metadata, version history, and processing history",
     tab: "HOME",
     group: "Recent",
-    keywords: ["metadata", "info"],
-    status: UNIMPLEMENTED,
+    keywords: ["metadata", "info", "versions", "history"],
+    // Real as of Phase 13 — see DocumentPropertiesDialog.
+    status: "available",
   },
 
   // ---- EDIT ----------------------------------------------------------------

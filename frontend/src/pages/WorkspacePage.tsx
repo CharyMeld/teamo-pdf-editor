@@ -9,6 +9,8 @@ import MergeDialog from "../components/dialogs/MergeDialog";
 import OcrResultsPanel from "../components/dialogs/OcrResultsPanel";
 import OfficeToPdfDialog from "../components/dialogs/OfficeToPdfDialog";
 import OpenDocumentDialog from "../components/dialogs/OpenDocumentDialog";
+import DocumentPropertiesDialog from "../components/dialogs/DocumentPropertiesDialog";
+import RecentDocumentsDialog from "../components/dialogs/RecentDocumentsDialog";
 import ReplacePageDialog from "../components/dialogs/ReplacePageDialog";
 import RunOcrDialog from "../components/dialogs/RunOcrDialog";
 import SaveAsDialog from "../components/dialogs/SaveAsDialog";
@@ -41,6 +43,8 @@ export default function WorkspacePage() {
       <OfficeToPdfDialog />
       <CompressDialog />
       <AiSettingsDialog />
+      <RecentDocumentsDialog />
+      <DocumentPropertiesDialog />
     </WorkspaceProviders>
   );
 }

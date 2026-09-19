@@ -51,6 +51,16 @@ export type DocumentStatus =
   | "failed"
   | "archived";
 
+/** Phase 13: a purely presentational lifecycle label, distinct from `status` — see `Document::lifecycleState()`'s docblock server-side. */
+export type DocumentLifecycleState =
+  | "processing"
+  | "failed"
+  | "archived"
+  | "password_protected"
+  | "working"
+  | "saved"
+  | "original";
+
 export interface DocumentSummary {
   id: string;
   title: string;
@@ -60,6 +70,8 @@ export interface DocumentSummary {
   status: DocumentStatus;
   pageCount: number | null;
   createdAt: string;
+  updatedAt: string;
+  lifecycleState: DocumentLifecycleState;
 }
 
 export interface DocumentPageMeta {
@@ -70,8 +82,10 @@ export interface DocumentPageMeta {
   thumbnailReady: boolean;
 }
 
-export async function listDocuments(): Promise<DocumentSummary[]> {
-  const { data } = await api.get<{ data: DocumentSummary[] }>("/documents");
+export async function listDocuments(query?: string): Promise<DocumentSummary[]> {
+  const { data } = await api.get<{ data: DocumentSummary[] }>("/documents", {
+    params: query ? { q: query } : undefined,
+  });
   return data.data;
 }
 
@@ -127,6 +141,66 @@ export function workingFileUrl(id: string): string {
  * cross-origin. */
 export function documentThumbnailUrl(id: string, pageNumber: number): string {
   return `${API_BASE_URL}/documents/${id}/pages/${pageNumber}/thumbnail`;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 13 — document management: rename/delete/duplicate/download,
+// archive/unarchive, and version/processing history. See
+// DocumentController's matching methods server-side.
+
+export async function renameDocument(id: string, title: string): Promise<DocumentSummary> {
+  const { data } = await api.patch<DocumentSummary>(`/documents/${id}`, { title });
+  return data;
+}
+
+export async function deleteDocument(id: string): Promise<void> {
+  await api.delete(`/documents/${id}`);
+}
+
+export async function duplicateDocument(id: string): Promise<DocumentSummary> {
+  const { data } = await api.post<DocumentSummary>(`/documents/${id}/duplicate`);
+  return data;
+}
+
+/** A real attachment download — unlike `documentFileUrl`, which the PDF viewer embeds inline. */
+export function documentDownloadUrl(id: string): string {
+  return `${API_BASE_URL}/documents/${id}/download`;
+}
+
+export async function archiveDocument(id: string): Promise<DocumentSummary> {
+  const { data } = await api.post<DocumentSummary>(`/documents/${id}/archive`);
+  return data;
+}
+
+export async function unarchiveDocument(id: string): Promise<DocumentSummary> {
+  const { data } = await api.post<DocumentSummary>(`/documents/${id}/unarchive`);
+  return data;
+}
+
+export interface DocumentVersionSummary {
+  versionNumber: number;
+  sizeBytes: number;
+  createdAt: string;
+  isCurrent: boolean;
+}
+
+export async function getDocumentVersions(id: string): Promise<DocumentVersionSummary[]> {
+  const { data } = await api.get<{ data: DocumentVersionSummary[] }>(`/documents/${id}/versions`);
+  return data.data;
+}
+
+export interface DocumentHistoryEntry {
+  jobType: string;
+  status: string;
+  progressPercent: number;
+  createdAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
+export async function getDocumentHistory(id: string): Promise<DocumentHistoryEntry[]> {
+  const { data } = await api.get<{ data: DocumentHistoryEntry[] }>(`/documents/${id}/history`);
+  return data.data;
 }
 
 // ---------------------------------------------------------------------------
