@@ -57,6 +57,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/{document}/pages/{pageNumber}/thumbnail', [DocumentController::class, 'thumbnail']);
     Route::post('/documents/{document}/unlock', [DocumentController::class, 'unlock']);
 
+    // Phase 13 (document management): rename/delete/duplicate/download,
+    // archive/unarchive, and version/processing history — all real
+    // reads/writes over data every prior phase already produces (see
+    // DocumentController's new methods' docblocks). No new schema.
+    Route::patch('/documents/{document}', [DocumentController::class, 'update']);
+    Route::delete('/documents/{document}', [DocumentController::class, 'destroy']);
+    Route::post('/documents/{document}/duplicate', [DocumentController::class, 'duplicate']);
+    Route::get('/documents/{document}/download', [DocumentController::class, 'download']);
+    Route::post('/documents/{document}/archive', [DocumentController::class, 'archive']);
+    Route::post('/documents/{document}/unarchive', [DocumentController::class, 'unarchive']);
+    Route::get('/documents/{document}/versions', [DocumentController::class, 'versions']);
+    Route::get('/documents/{document}/history', [DocumentController::class, 'history']);
+
     // Phase 3 (ORGANIZE): real page-management operations against the
     // document's working copy — see WorkingCopyManager's docblock and
     // ARCHITECTURE.md's Phase 3 section.

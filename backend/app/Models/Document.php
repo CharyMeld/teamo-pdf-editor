@@ -81,6 +81,28 @@ class Document extends Model
         return $this->current_step_id !== null;
     }
 
+    /**
+     * A computed, purely presentational lifecycle label (Phase 13) —
+     * deliberately separate from the real `status` column, which keeps
+     * governing ingest/processing exactly as every prior phase built
+     * it. `status` answers "can this document be worked on right now;
+     * `lifecycleState` answers "where is this document in its own
+     * edit/save history," for the document-management UI's benefit
+     * only — nothing else should key behavior off this value.
+     */
+    public function lifecycleState(): string
+    {
+        return match ($this->status) {
+            'uploading', 'validating', 'processing' => 'processing',
+            'failed' => 'failed',
+            'archived' => 'archived',
+            'password_protected' => 'password_protected',
+            default => $this->hasPendingEdits()
+                ? 'working'
+                : ($this->versions()->count() > 1 ? 'saved' : 'original'),
+        };
+    }
+
     public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);
@@ -105,6 +127,8 @@ class Document extends Model
             'status' => $this->status,
             'pageCount' => $this->page_count,
             'createdAt' => $this->created_at?->toIso8601String(),
+            'updatedAt' => $this->updated_at?->toIso8601String(),
+            'lifecycleState' => $this->lifecycleState(),
         ];
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\Services\AuditLogger;
+use App\Domain\Editing\Services\WorkingCopyManager;
 use App\Domain\Rendering\Services\DocumentThumbnailRenderer;
 use App\Exceptions\DocumentValidationException;
 use App\Http\Controllers\Controller;
@@ -26,10 +27,23 @@ use Throwable;
  */
 class DocumentController extends Controller
 {
+    /**
+     * Phase 13: optional `?q=` searches title/original_filename — the
+     * default (no param) behavior every existing caller relies on
+     * (the "Open recent" quick-pick, and this endpoint's own original
+     * use) is unchanged.
+     */
     public function index(Request $request): JsonResponse
     {
-        $documents = Document::where('user_id', $request->user()->id)
-            ->orderByDesc('created_at')
+        $query = Document::where('user_id', $request->user()->id);
+
+        $search = trim((string) $request->query('q', ''));
+        if ($search !== '') {
+            $query->where(fn ($q) => $q->where('title', 'like', "%{$search}%")
+                ->orWhere('original_filename', 'like', "%{$search}%"));
+        }
+
+        $documents = $query->orderByDesc('created_at')
             ->get()
             ->map(fn (Document $d) => $this->serializeDocument($d));
 
@@ -236,6 +250,123 @@ class DocumentController extends Controller
         }
 
         return response()->json($this->serializeDocument($document->fresh()));
+    }
+
+    /** Phase 13 (document management). */
+    public function update(Request $request, Document $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+        $data = $request->validate(['title' => ['required', 'string', 'max:255']]);
+
+        $document->update(['title' => $data['title']]);
+        AuditLogger::record('document.renamed', $document, ['title' => $data['title']], $request);
+
+        return response()->json($this->serializeDocument($document));
+    }
+
+    /** Soft delete — Document::SoftDeletes already excludes trashed rows from every existing query, so no other code needs to change. */
+    public function destroy(Request $request, Document $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+
+        $document->delete();
+        AuditLogger::record('document.deleted', $document, [], $request);
+
+        return response()->json(['deleted' => true]);
+    }
+
+    /**
+     * A real, independent copy: a brand-new Document + first version,
+     * via the exact same primitive Phase 6/8 use to turn a produced
+     * file into a new document — see WorkingCopyManager's docblock.
+     */
+    public function duplicate(Request $request, Document $document, WorkingCopyManager $working): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+
+        $version = $document->currentVersion ?? $document->versions()->where('version_number', 1)->first();
+        abort_if(! $version, 404);
+        $absolutePath = Storage::disk($version->storage_disk)->path($version->storage_path);
+        abort_unless(is_file($absolutePath), 404);
+
+        $copy = $working->createDocumentFromFile(
+            $request->user(),
+            $absolutePath,
+            "{$document->title} (copy)",
+            $document->original_filename,
+        );
+
+        AuditLogger::record('document.duplicated', $document, ['copyId' => $copy->uuid], $request);
+
+        return response()->json($this->serializeDocument($copy), 201);
+    }
+
+    /** Same file resolution as file(), but a real attachment download instead of an inline response — file() itself is untouched since the PDF viewer needs its current inline behavior. */
+    public function download(Request $request, Document $document): BinaryFileResponse
+    {
+        $this->authorizeOwner($request, $document);
+        abort_if($document->status === 'password_protected', 423, 'This document is locked.');
+
+        $version = $document->currentVersion ?? $document->versions()->where('version_number', 1)->first();
+        abort_if(! $version, 404);
+        $absolutePath = Storage::disk($version->storage_disk)->path($version->storage_path);
+        abort_unless(is_file($absolutePath), 404);
+
+        AuditLogger::record('document.downloaded', $document, [], $request);
+
+        return response()->download($absolutePath, $document->original_filename);
+    }
+
+    public function archive(Request $request, Document $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+        abort_unless($document->status === 'ready', 422, 'Only a ready document can be archived.');
+
+        $document->update(['status' => 'archived']);
+        AuditLogger::record('document.archived', $document, [], $request);
+
+        return response()->json($this->serializeDocument($document));
+    }
+
+    public function unarchive(Request $request, Document $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+        abort_unless($document->status === 'archived', 422, 'Only an archived document can be unarchived.');
+
+        $document->update(['status' => 'ready']);
+        AuditLogger::record('document.unarchived', $document, [], $request);
+
+        return response()->json($this->serializeDocument($document));
+    }
+
+    public function versions(Request $request, Document $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+
+        $versions = $document->versions()->orderByDesc('version_number')->get()->map(fn (DocumentVersion $v) => [
+            'versionNumber' => $v->version_number,
+            'sizeBytes' => $v->size_bytes,
+            'createdAt' => $v->created_at?->toIso8601String(),
+            'isCurrent' => $v->is_current,
+        ]);
+
+        return response()->json(['data' => $versions]);
+    }
+
+    public function history(Request $request, Document $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $document);
+
+        $jobs = $document->jobs()->orderByDesc('created_at')->get()->map(fn (DocumentJob $j) => [
+            'jobType' => $j->job_type,
+            'status' => $j->status,
+            'progressPercent' => $j->progress_percent,
+            'createdAt' => $j->created_at?->toIso8601String(),
+            'completedAt' => $j->completed_at?->toIso8601String(),
+            'errorMessage' => $j->error_message,
+        ]);
+
+        return response()->json(['data' => $jobs]);
     }
 
     private function authorizeOwner(Request $request, Document $document): void
