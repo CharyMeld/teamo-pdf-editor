@@ -47,7 +47,11 @@ interface AnnotationsContextValue {
   imagePreviewUrls: Record<string, string>;
 
   placementMode: PlacementMode;
-  startPlacing: (mode: Exclude<PlacementMode, null>) => void;
+  /** `signatureDefaults` flags the resulting annotation `isSignature` —
+   * used by the SIGN tab's "Draw Signature" command, which reuses this
+   * exact freehand placement mechanism unchanged (see ARCHITECTURE.md's
+   * Phase 11 section). */
+  startPlacing: (mode: Exclude<PlacementMode, null>, opts?: { signatureDefaults?: boolean }) => void;
   cancelPlacing: () => void;
 
   /** Commits any box-shaped or point-based annotation (everything except
@@ -117,6 +121,7 @@ export function AnnotationsProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState<PlacementMode>(null);
+  const [pendingIsSignature, setPendingIsSignature] = useState(false);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({});
 
   const fetchGenerationRef = useRef(0);
@@ -182,12 +187,16 @@ export function AnnotationsProvider({ children }: { children: ReactNode }) {
       });
   }, [doc, view.currentPage]);
 
-  const startPlacing = useCallback((mode: Exclude<PlacementMode, null>) => {
+  const startPlacing = useCallback((mode: Exclude<PlacementMode, null>, opts?: { signatureDefaults?: boolean }) => {
     setSelectedId(null);
     setPlacementMode(mode);
+    setPendingIsSignature(!!opts?.signatureDefaults);
   }, []);
 
-  const cancelPlacing = useCallback(() => setPlacementMode(null), []);
+  const cancelPlacing = useCallback(() => {
+    setPlacementMode(null);
+    setPendingIsSignature(false);
+  }, []);
 
   const runMutating = useCallback(
     async <T extends { pageCount: number; canUndo: boolean; canRedo: boolean }>(
@@ -219,18 +228,23 @@ export function AnnotationsProvider({ children }: { children: ReactNode }) {
       if (!doc || placementMode === null) return;
       const type = placementMode;
       const page = view.currentPage;
-      const params = { ...defaultAnnotationParams(type), ...(extra?.params ?? {}) };
+      const params = {
+        ...defaultAnnotationParams(type),
+        ...(extra?.params ?? {}),
+        ...(pendingIsSignature ? { isSignature: true } : {}),
+      };
       try {
         const result = await runMutating(() =>
           createAnnotation(doc.id, { type, page, ...box, x2: extra?.x2, y2: extra?.y2, params }),
         );
         setPlacementMode(null);
+        setPendingIsSignature(false);
         selectAnnotation(result.annotationId, type);
       } catch {
         // runMutating already recorded the error; placement stays open so the user can retry.
       }
     },
-    [doc, placementMode, view.currentPage, runMutating, selectAnnotation],
+    [doc, placementMode, pendingIsSignature, view.currentPage, runMutating, selectAnnotation],
   );
 
   const createStampImage = useCallback(

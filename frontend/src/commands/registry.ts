@@ -660,14 +660,43 @@ export const REGISTRY: Command[] = [
   },
 
   // ---- SIGN --------------------------------------------------------------
+  // Real as of Phase 11 — see ARCHITECTURE.md. A placed signature is not a
+  // new kind of object: Draw produces a real freehand annotation (Phase 5),
+  // Type a real text object in a genuinely embedded cursive font (Phase 4),
+  // Upload a real image object (Phase 4) — each just flagged `isSignature`
+  // so Move/Resize/Delete (already built) work for free and the Smart
+  // Inspector shows the visual-vs-cryptographic honesty note. Request/
+  // Certificate stay unavailable — real cryptographic signing (TCPDF's
+  // setSignature()) and send-for-signature are out of this phase's scope.
   {
     id: "sign.draw",
     label: "Draw Signature",
-    description: "Draw and place your signature",
+    description: "Draw your signature directly on the page",
     tab: "SIGN",
     group: "Signature",
-    keywords: ["sign document"],
-    status: UNIMPLEMENTED,
+    keywords: ["sign document", "pen"],
+    icon: "pen",
+    status: "available",
+  },
+  {
+    id: "sign.type",
+    label: "Type Signature",
+    description: "Type your name in a cursive signature font",
+    tab: "SIGN",
+    group: "Signature",
+    keywords: ["sign document", "cursive", "text signature"],
+    icon: "text",
+    status: "available",
+  },
+  {
+    id: "sign.upload",
+    label: "Upload Signature Image",
+    description: "Place an image of your signature",
+    tab: "SIGN",
+    group: "Signature",
+    keywords: ["sign document", "signature image", "scan signature"],
+    icon: "image",
+    status: "available",
   },
   {
     id: "sign.request",

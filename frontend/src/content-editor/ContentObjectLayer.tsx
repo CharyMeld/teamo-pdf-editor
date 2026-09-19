@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { ContentBox, ContentObject, TextObjectParams } from "../lib/api";
 import Icon from "../components/ui/Icon";
 import { useActiveTab } from "../hooks/useActiveTab";
-import { DEFAULT_TEXT_PARAMS, useContentObjects } from "./useContentObjects";
+import { DEFAULT_TEXT_PARAMS, SIGNATURE_TEXT_DEFAULTS, useContentObjects } from "./useContentObjects";
 import TextComposerPopover from "./TextComposerPopover";
 
 const MIN_SIZE_PT = 8;
@@ -50,6 +50,7 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
     selectObject,
     imagePreviewUrls,
     placementMode,
+    pendingIsSignature,
     cancelPlacing,
     commitTextPlacement,
     createImage,
@@ -64,9 +65,13 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
   // active ribbon tab (while every individual object's own wrapper div
   // below keeps `pointer-events-auto` unconditionally, so existing objects
   // stay clickable/selectable from either tab) resolves this with no
-  // z-index/DOM-order dependency.
+  // z-index/DOM-order dependency. SIGN's "Type"/"Upload Signature" commands
+  // arm this exact same placementMode ("text"/"image") while SIGN is the
+  // active tab (see Phase 11's useSignatureRunHandlers), so this layer must
+  // also count itself active in that specific case, not just on EDIT.
   const { activeTab } = useActiveTab();
-  const isActiveLayer = activeTab === "EDIT";
+  const isActiveLayer =
+    activeTab === "EDIT" || (activeTab === "SIGN" && (placementMode === "text" || placementMode === "image"));
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -308,7 +313,14 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
               <div
                 className="h-full w-full overflow-hidden whitespace-pre-wrap break-words px-0.5"
                 style={{
-                  fontFamily: textParams?.font === "Times" ? "serif" : textParams?.font === "Courier" ? "monospace" : "sans-serif",
+                  fontFamily:
+                    textParams?.font === "Pacifico"
+                      ? "'Pacifico', cursive"
+                      : textParams?.font === "Times"
+                        ? "serif"
+                        : textParams?.font === "Courier"
+                          ? "monospace"
+                          : "sans-serif",
                   fontSize: (textParams?.fontSize ?? 12) * scale,
                   fontWeight: textParams?.bold ? 700 : 400,
                   fontStyle: textParams?.italic ? "italic" : "normal",
@@ -367,7 +379,7 @@ export default function ContentObjectLayer({ pageNumber, heightPt, scale }: Prop
           scale={scale}
           heightPx={heightPx}
           isOverlayEdit={placementMode === "editText"}
-          initialParams={DEFAULT_TEXT_PARAMS}
+          initialParams={pendingIsSignature ? SIGNATURE_TEXT_DEFAULTS : DEFAULT_TEXT_PARAMS}
           busy={busy}
           onConfirm={(p) => void handleComposerConfirm(p)}
           onCancel={handleComposerCancel}

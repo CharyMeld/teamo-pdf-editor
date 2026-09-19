@@ -26,6 +26,11 @@ export default function ImageObjectPanel() {
 
   return (
     <Panel title="Image Selection">
+      {params.isSignature && (
+        <p className="mb-2 rounded bg-warning-subtle px-1.5 py-1 text-[10px] leading-snug text-warning">
+          This is a visual signature mark, not a legally verified cryptographic/digital signature.
+        </p>
+      )}
       <div className="mb-2 flex h-24 items-center justify-center overflow-hidden rounded border border-border bg-surface-muted">
         {preview ? (
           <img src={preview} alt="" className="h-full w-full object-contain" />

@@ -7,6 +7,7 @@ import { useDocumentViewState } from "../../hooks/useDocumentViewState";
 import { useFormRunHandlers } from "../../hooks/useFormRunHandlers";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
+import { useSignatureRunHandlers } from "../../hooks/useSignatureRunHandlers";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useWorkingDocument } from "../../hooks/useWorkingDocument";
 import { useCompressionWorkflow } from "../../compression/useCompressionWorkflow";
@@ -63,6 +64,7 @@ export default function CommandRibbon() {
   const contentEditor = useContentEditorRunHandlers();
   const annotations = useAnnotationRunHandlers();
   const forms = useFormRunHandlers();
+  const signatures = useSignatureRunHandlers();
   const scanWorkflow = useScanWorkflow();
   const ocrWorkflow = useOcrWorkflow();
   const conversionWorkflow = useConversionWorkflow();
@@ -101,6 +103,7 @@ export default function CommandRibbon() {
     ...contentEditor.runHandlers,
     ...annotations.runHandlers,
     ...forms.runHandlers,
+    ...signatures.runHandlers,
   };
   const documentReady = !!doc && doc.status === "ready";
   const disabledReasons: Record<string, string> = {
@@ -123,6 +126,7 @@ export default function CommandRibbon() {
     ...contentEditor.disabledReasons,
     ...annotations.disabledReasons,
     ...forms.disabledReasons,
+    ...signatures.disabledReasons,
   };
 
   return (

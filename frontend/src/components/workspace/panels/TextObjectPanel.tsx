@@ -52,6 +52,11 @@ export default function TextObjectPanel() {
           text directly.
         </p>
       )}
+      {params.isSignature && (
+        <p className="mb-2 rounded bg-warning-subtle px-1.5 py-1 text-[10px] leading-snug text-warning">
+          This is a visual signature mark, not a legally verified cryptographic/digital signature.
+        </p>
+      )}
       <textarea
         rows={3}
         value={params.text}

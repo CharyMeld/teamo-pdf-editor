@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @import "./design-system/theme.css";
 
+/* The exact cursive font PdfContentEngine embeds server-side for a "Type
+   Signature" text object (see backend/resources/fonts/signature) — loaded
+   client-side too so the live canvas/composer preview matches the real
+   generated PDF instead of falling back to a generic sans-serif. */
+@font-face {
+  font-family: "Pacifico";
+  src: url("/fonts/Pacifico-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 html,
 body,
 #root {

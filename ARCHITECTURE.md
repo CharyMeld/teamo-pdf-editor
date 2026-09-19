@@ -2645,3 +2645,222 @@ Any UI for auto-field-detection (backend stays unimplemented — see
 above). A distinct Design/Fill mode toggle (found unnecessary — see
 above). Real signature capture/placement (Phase 11's job — the
 placeholder panel says so explicitly). No AI.
+
+## Phase 11 (backend) — visual PDF signing (2026-09-19)
+
+The brief asks for Draw/Type/Upload signature creation, Place/Resize/
+Move/Delete, and — critically — an explicit, honest distinction between a
+*visual* signature mark and a real cryptographic/digital signature, plus
+"prepared architecture" for certificate-based signing later.
+
+**The key finding, made before writing any code**: a placed signature
+needs no new object type, no new chain, no new engine, no new routes. A
+drawn signature is a real Phase 5 freehand annotation; a typed signature
+is a real Phase 4 text object in a genuinely embedded cursive font; an
+uploaded signature is a real Phase 4 image object. Each is just an
+existing object flagged `isSignature: true`, threaded through the exact
+same `normalizeParams()`/`normalizeImageParams()`/`normalizeFreehandParams()`
+methods those phases already built. Move/Resize/Delete/Undo/Redo are the
+existing chain mechanics, exercised unchanged — nothing new to build or
+verify beyond confirming the flag survives every mutation (it does; see
+Testing below).
+
+### The signature font
+
+`PdfContentEngine::AVAILABLE_FONTS` gained a fourth, real entry:
+`'Pacifico'`, a single-weight, OFL-licensed cursive Google Font, bundled
+as `backend/resources/fonts/signature/Pacifico-Regular.{json,z,ttf}`
+(`.json`+`.z` are FPDF's own embedded-font format, produced by FPDF's
+bundled `makefont.php` CLI: `php makefont.php Pacifico-Regular.ttf cp1252
+true true`, run from inside `vendor/setasign/fpdf/makefont/` after
+copying the source `.ttf` there). `compose()` registers it once per
+document via `AddFont('Pacifico', '', 'Pacifico-Regular.json',
+$fontDir)` before drawing.
+
+**A real, easy-to-get-wrong FPDF API detail, confirmed directly**:
+`AddFont()`'s 3rd argument (`$file`) must be a bare filename — FPDF
+explicitly rejects any value containing a path separator — with the
+directory passed separately as the 4th argument (`$dir`). Passing a full
+path there throws "Incorrect font definition file name."
+
+Verified via `pdffonts`/`pdftotext`/`qpdf --check` on a real composed
+PDF: `AAAAAA+Pacifico-Regular`, `emb: yes, sub: yes, uni: yes` — a
+genuinely embedded, subsetted, Unicode-mapped TrueType font, not a raster
+fallback, and the typed text is real, extractable page content.
+
+Pacifico ships as a single regular weight with no embedded bold/italic
+variant, so `drawText()` forces an empty style string whenever
+`font === 'Pacifico'`, regardless of the object's own `bold`/`italic`
+params — requesting a style FPDF never registered would throw "Undefined
+font," not silently substitute a core font.
+
+### Threading the `isSignature` flag
+
+`ContentObjectService::normalizeParams()` (text/text_overlay_edit
+branch) and `normalizeImageParams()`, and `AnnotationService::
+normalizeFreehandParams()`, each gained `'isSignature' => (bool)
+($params['isSignature'] ?? false)` in their returned array — the same
+narrow, additive pattern used for every other per-type flag in these
+methods.
+
+**Two real gotchas found only by testing the actual round-trip, not by
+trusting a 201 response**:
+
+1. `DocumentContentController::validateObjectPayload()` and
+   `DocumentAnnotationController::validateAnnotationPayload()` both
+   validate with an explicit, per-type key list (`$request->validate([...])`)
+   — a key with no rule is silently dropped before it ever reaches the
+   service layer. `params.isSignature` needed an explicit `['sometimes',
+   'boolean']` rule added to the text, image, and freehand rule sets;
+   without it, every signature silently saved as `isSignature: false`
+   despite the client sending `true` and the request returning 201.
+   **Reusable lesson: adding a new optional `params.*` key to an existing
+   object type needs a validation-rule addition here, not just a
+   service-layer default** — this is the same class of "silently
+   stripped, not rejected" trap as Phase 10's `sometimes`+`nullable`
+   finding, just at the controller's allow-list layer instead of the
+   validation-type layer.
+2. `ContentObjectService::publicParams()` hard-filters an image object's
+   params down to `{ originalFilename }` only (deliberately hiding the
+   real `storagePath`, per Phase 4's docblock) — so `isSignature` was
+   silently invisible in every `GET .../content/objects` response for
+   image signatures specifically (text and freehand were unaffected,
+   since neither has a `publicParams`-style filter). Fixed by adding
+   `isSignature` to that filtered array explicitly. **Reusable lesson:
+   any object type with its own `publicParams`/output-filtering method
+   needs new flags added there too, not just to the storage-side
+   normalizer** — the two are easy to update out of sync.
+
+### "Prepare the architecture for future certificate-based signing"
+
+Not built here, honestly. `tecnickcom/tcpdf` (already a dependency since
+Phase 10) has a real `setSignature()` API for PAdES/PKCS7 cryptographic
+signing — the concrete, already-available extension point for a future
+phase's `sign.certificate` command. This phase's own SIGN-tab signatures
+stay pure FPDI/FPDF content (real vector text/image/strokes), same as
+every other Phase 4/5 object; they are never presented as, and never
+become, a cryptographic signature.
+
+### Testing
+
+Verified against the live stack via curl (dev-login session, real
+`multipart/form-data` for the image upload): placed a drawn (freehand),
+typed (Pacifico text), and uploaded (image) signature on a real test
+document, confirmed `isSignature: true` round-trips through `GET
+.../content/objects` and `GET .../annotations` for all three, confirmed
+the composed PDF renders all three as real vector content (`pdftoppm`
+render inspected directly), and exercised move/resize (PATCH),
+delete/undo/redo on the typed signature — `isSignature` survived every
+mutation unchanged, confirming Phase 4's existing chain mechanics need
+no signature-specific handling at all.
+
+### What Phase 11 (backend) does NOT include
+
+Real cryptographic/digital signing (`sign.certificate` stays
+unavailable — see above). Send-for-signature / external signing
+workflows (`sign.request` stays unavailable — out of this phase's brief
+entirely). Any new object type, chain, table, or route.
+
+## Phase 11 (frontend) — real signature creation UI (2026-09-19)
+
+SIGN had three scaffolded commands (`sign.draw`, `sign.request`,
+`sign.certificate`), all unavailable. `sign.draw` is now real, and two
+previously-missing commands were added: `sign.type` and `sign.upload` —
+the same kind of registry gap Phases 7-10 also each found on arrival.
+`sign.request`/`sign.certificate` stay unavailable, honestly, per the
+backend section's scope boundary.
+
+**No new dialog, canvas, or placement mechanism was built.** Per the
+backend section's key finding, a signature is an existing Phase 4/5
+object type; the frontend change is equally narrow — each SIGN command
+arms the *exact same* `startPlacing()` mechanism `useContentObjects`
+(Phase 4) and `useAnnotations` (Phase 5) already expose, with a new
+`{ signatureDefaults: true }` option that:
+
+- sets a `pendingIsSignature` flag, merged into the created object's/
+  annotation's params on commit (`commitTextPlacement`, `createImage`,
+  `commitAnnotation`), so the resulting object is genuinely flagged
+  server-side;
+- for Type specifically, seeds `TextComposerPopover`'s initial params
+  with `SIGNATURE_TEXT_DEFAULTS` (`font: 'Pacifico', fontSize: 32`)
+  instead of the plain-text `DEFAULT_TEXT_PARAMS`.
+
+`sign.draw` arms `useAnnotations().startPlacing("freehand", {
+signatureDefaults: true })` — literally Phase 5's existing full-page
+freehand drawing tool, just flagged. `sign.type` arms `useContentObjects
+().startPlacing("text", { signatureDefaults: true })` — Phase 4's
+existing drag-a-box-then-type text flow. `sign.upload` arms the same
+placement with `"image"` — Phase 4's existing drag-a-box-then-pick-a-file
+flow. Move/Resize/Delete/Undo/Redo needed zero new frontend code: they're
+`ContentObjectLayer`'s and `AnnotationLayer`'s existing drag handles and
+`TextObjectPanel`/`ImageObjectPanel`/`LineAnnotationPanel`'s existing
+Duplicate/Delete footer, all of which already operate on any object of
+these types regardless of which tab created it.
+
+### A real cross-cutting wiring gap this phase found
+
+`ContentObjectLayer` and `AnnotationLayer` each gate their own
+background pointer-event handling behind `isActiveLayer = activeTab ===
+"EDIT"` / `"ANNOTATE"` respectively (so the two full-page overlays don't
+fight over the same background click — see their own docblocks). SIGN's
+commands arm the identical `placementMode` values while SIGN is the
+active tab, so both layers' `isActiveLayer` checks needed a second
+clause (`|| (activeTab === "SIGN" && placementMode === ...)`) — otherwise
+a signature placement drag would visually arm (crosshair cursor) but the
+canvas would silently ignore every pointer event, since the container's
+own `pointer-events-none` class would still apply. **Reusable lesson:
+any future tab that reuses an existing placement mechanism from a
+different tab's canvas layer must extend that layer's `isActiveLayer`
+condition, not just call the existing `startPlacing()`.**
+
+### The honesty note
+
+A persistent, non-dismissible note — "This is a visual signature mark,
+not a legally verified cryptographic/digital signature." — renders in
+three places, reusing the exact `bg-warning-subtle`/`text-warning`
+treatment `TextObjectPanel` already established for
+`text_overlay_edit`'s own honesty note:
+
+- `TextComposerPopover`, live, while typing a signature (before commit);
+- `TextObjectPanel` / `ImageObjectPanel` / `LineAnnotationPanel`'s Smart
+  Inspector panels, whenever the selected object's `params.isSignature`
+  is true — i.e. every time a signature is selected, for as long as it
+  exists, from any tab.
+
+### Live Pacifico preview
+
+A `@font-face` for Pacifico was added to `index.css`, loading the exact
+same `.ttf` bundled server-side (`frontend/public/fonts/Pacifico-Regular.ttf`,
+copied from the same source as the backend's `.json`/`.z` conversion) —
+so `TextComposerPopover`'s textarea and `ContentObjectLayer`'s on-canvas
+object rendering both show the real cursive font while typing/placing, not
+a generic sans-serif fallback that would only resolve to the real font
+after a reload. `TextStyleFields`'s font dropdown gained `'Pacifico'` as a
+selectable option (`FONT_OPTIONS`), and its bold/italic toggles disable
+themselves when the selected font is Pacifico (see the backend section's
+matching style-forcing note — a UI control that silently does nothing
+server-side is worse than no control).
+
+### Testing
+
+Playwright against `google-chrome-stable`, driven against the real live
+stack end-to-end: opened a real test PDF, switched to SIGN, and created
+one of each signature type via real canvas interaction — a drag-box +
+typed text for Type (confirmed the live Pacifico preview and honesty
+note in the composer), a drag-box + native file chooser for Upload, and
+a direct multi-point drag for Draw. Confirmed the Smart Inspector's
+contextual panel and honesty note for all three, confirmed Delete works
+from the SIGN tab's own contextual group, saved the document, and
+re-fetched the real saved `DocumentVersion` file directly — `pdffonts`/
+`pdftotext`/`qpdf --check` confirmed the typed signature's Pacifico
+embedding survives a real Save unchanged (same verification discipline
+as every prior phase).
+
+### What Phase 11 (frontend) does NOT include
+
+Any new dialog/modal component (found unnecessary — see above). A
+small-canvas "signature pad" widget for Draw (the existing full-page
+freehand tool already provides real, final-scale, final-position
+drawing — arguably a better UX than a separate pad requiring a second
+placement/scaling step). Any UI for `sign.request`/`sign.certificate`
+(both stay unavailable). No AI.

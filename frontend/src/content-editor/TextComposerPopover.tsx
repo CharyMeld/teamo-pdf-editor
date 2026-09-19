@@ -63,13 +63,23 @@ export default function TextComposerPopover({
           text directly.
         </p>
       )}
+      {params.isSignature && (
+        <p className="mb-1.5 rounded bg-warning-subtle px-1.5 py-1 text-[10px] leading-snug text-warning">
+          This is a visual signature mark, not a legally verified cryptographic/digital signature.
+        </p>
+      )}
       <textarea
         autoFocus
         rows={3}
         value={params.text}
         onChange={(e) => setParams((p) => ({ ...p, text: e.target.value }))}
-        placeholder="Type text…"
-        className="mb-2 w-full resize-none rounded border border-border bg-bg px-1.5 py-1 text-xs text-text"
+        placeholder={params.isSignature ? "Type your name…" : "Type text…"}
+        className="mb-2 w-full resize-none rounded border border-border bg-bg px-1.5 py-1 text-text"
+        style={
+          params.font === "Pacifico"
+            ? { fontFamily: "'Pacifico', cursive", fontSize: Math.min(params.fontSize, 28) }
+            : { fontSize: 12 }
+        }
       />
       <TextStyleFields params={params} onChange={setParams} />
       <div className="mt-2 flex items-center justify-end gap-1.5">

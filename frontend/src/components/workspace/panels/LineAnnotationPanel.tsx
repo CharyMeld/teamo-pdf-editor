@@ -25,6 +25,11 @@ export default function LineAnnotationPanel() {
 
   return (
     <Panel title={selectedAnnotation.type === "freehand" ? "Freehand Drawing" : "Arrow"}>
+      {(params as FreehandAnnotationParams).isSignature && (
+        <p className="mb-2 rounded bg-warning-subtle px-1.5 py-1 text-[10px] leading-snug text-warning">
+          This is a visual signature mark, not a legally verified cryptographic/digital signature.
+        </p>
+      )}
       <LineStyleFields params={params} onChange={(next) => void patchSelected({ params: next })} disabled={busy} />
       <div className="mt-3 flex items-center justify-between border-t border-border pt-2">
         <div className="flex items-center gap-1">

@@ -1,7 +1,7 @@
 import type { TextAlign, TextObjectParams } from "../lib/api";
 import IconButton from "../components/ui/IconButton";
 
-export const FONT_OPTIONS: TextObjectParams["font"][] = ["Helvetica", "Times", "Courier"];
+export const FONT_OPTIONS: TextObjectParams["font"][] = ["Helvetica", "Times", "Courier", "Pacifico"];
 
 const ALIGN_OPTIONS: { value: TextAlign; icon: "alignLeft" | "alignCenter" | "alignRight"; label: string }[] = [
   { value: "left", icon: "alignLeft", label: "Align left" },
@@ -21,6 +21,10 @@ interface Props {
  * post-creation editing panel (TextObjectPanel) so both stay in sync and
  * neither duplicates this markup. */
 export function TextStyleFields({ params, onChange, disabled = false }: Props) {
+  // Pacifico is bundled/embedded as a single regular weight only (see
+  // PdfContentEngine's docblock) — no bold/italic variant exists to
+  // request, so those toggles would silently do nothing server-side.
+  const styleTogglesDisabled = disabled || params.font === "Pacifico";
   return (
     <div className="flex flex-col gap-1.5 text-[11px]">
       <div className="flex items-center gap-1.5">
@@ -58,7 +62,7 @@ export function TextStyleFields({ params, onChange, disabled = false }: Props) {
           label="Bold"
           size="sm"
           active={params.bold}
-          disabled={disabled}
+          disabled={styleTogglesDisabled}
           onClick={() => onChange((p) => ({ ...p, bold: !p.bold }))}
         />
         <IconButton
@@ -66,7 +70,7 @@ export function TextStyleFields({ params, onChange, disabled = false }: Props) {
           label="Italic"
           size="sm"
           active={params.italic}
-          disabled={disabled}
+          disabled={styleTogglesDisabled}
           onClick={() => onChange((p) => ({ ...p, italic: !p.italic }))}
         />
         <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />

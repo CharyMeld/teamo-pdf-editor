@@ -85,9 +85,12 @@ export default function AnnotationLayer({ pageNumber, heightPt, scale }: Props) 
   // overlays need exactly one of them "live" for background clicks at a
   // time, gated by the active ribbon tab, while every individual
   // annotation's own wrapper below keeps `pointer-events-auto`
-  // unconditionally so it stays clickable from either tab.
+  // unconditionally so it stays clickable from either tab. SIGN's "Draw
+  // Signature" command arms this exact same freehand placementMode while
+  // SIGN is the active tab (see Phase 11's useSignatureRunHandlers), so
+  // this layer must also count itself active in that specific case.
   const { activeTab } = useActiveTab();
-  const isActiveLayer = activeTab === "ANNOTATE";
+  const isActiveLayer = activeTab === "ANNOTATE" || (activeTab === "SIGN" && placementMode === "freehand");
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);

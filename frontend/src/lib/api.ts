@@ -337,18 +337,24 @@ export type TextAlign = "left" | "center" | "right";
 
 export interface TextObjectParams {
   text: string;
-  font: "Helvetica" | "Times" | "Courier";
+  font: "Helvetica" | "Times" | "Courier" | "Pacifico";
   fontSize: number;
   bold: boolean;
   italic: boolean;
   color: string;
   align: TextAlign;
   lineSpacing: number;
+  /** Set for a "Type Signature" object (SIGN tab) — a genuine text object,
+   * just flagged so the UI can show the visual-vs-cryptographic honesty
+   * note. See ARCHITECTURE.md's Phase 11 section. */
+  isSignature?: boolean;
 }
 
 export interface ImageObjectParams {
   storagePath?: string;
   originalFilename?: string;
+  /** Set for an "Upload Signature Image" object (SIGN tab). See TextObjectParams.isSignature. */
+  isSignature?: boolean;
 }
 
 export interface ContentBox {
@@ -448,6 +454,7 @@ export interface CreateImageObjectInput {
   width: number;
   height: number;
   file: File;
+  isSignature?: boolean;
 }
 
 export function createImageObject(id: string, input: CreateImageObjectInput): Promise<ContentOperationResult> {
@@ -458,6 +465,7 @@ export function createImageObject(id: string, input: CreateImageObjectInput): Pr
   form.append("y", String(input.y));
   form.append("width", String(input.width));
   form.append("height", String(input.height));
+  if (input.isSignature) form.append("params[isSignature]", "1");
   form.append("file", input.file);
   return api.post<ContentOperationResult>(`/documents/${id}/content/objects`, form).then((r) => r.data);
 }
@@ -533,6 +541,8 @@ export interface FreehandAnnotationParams {
   points: FreehandPoint[];
   color: string;
   thickness: number;
+  /** Set for a "Draw Signature" annotation (SIGN tab). See TextObjectParams.isSignature. */
+  isSignature?: boolean;
 }
 
 export interface ArrowAnnotationParams {

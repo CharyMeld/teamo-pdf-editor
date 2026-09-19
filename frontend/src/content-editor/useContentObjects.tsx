@@ -38,6 +38,16 @@ export const DEFAULT_TEXT_PARAMS: TextObjectParams = {
   lineSpacing: 1.2,
 };
 
+/** Seeds the SIGN tab's "Type Signature" composer — Pacifico, the real
+ * embedded cursive font verified in PdfContentEngine (see its docblock),
+ * at a larger default size that reads naturally as a signature. */
+export const SIGNATURE_TEXT_DEFAULTS: TextObjectParams = {
+  ...DEFAULT_TEXT_PARAMS,
+  font: "Pacifico",
+  fontSize: 32,
+  isSignature: true,
+};
+
 /** What the user is currently trying to place on the canvas via a
  * click-and-drag box (see ContentObjectLayer) — mirrors CropDialog's single-
  * purpose drag interaction, generalized to two placement kinds. Cleared as
@@ -66,7 +76,15 @@ interface ContentObjectsContextValue {
   imagePreviewUrls: Record<string, string>;
 
   placementMode: PlacementMode;
-  startPlacing: (mode: Exclude<PlacementMode, null>) => void;
+  /** `signatureDefaults` seeds the text composer with signature-appropriate
+   * defaults (Pacifico font) and flags the resulting object `isSignature`
+   * — used by the SIGN tab's "Type Signature"/"Upload Signature Image"
+   * commands, which otherwise reuse this exact same placement mechanism
+   * (see ARCHITECTURE.md's Phase 11 section for why no new mechanism was
+   * needed). */
+  startPlacing: (mode: Exclude<PlacementMode, null>, opts?: { signatureDefaults?: boolean }) => void;
+  /** Set only while `startPlacing` was called with `signatureDefaults: true` — read by ContentObjectLayer to seed the text composer's initial params. */
+  pendingIsSignature: boolean;
   cancelPlacing: () => void;
   /** A box the user just drew (PDF points, bottom-left origin) while in
    * placementMode "text" or "editText" — commits via commitTextPlacement. */
@@ -104,6 +122,7 @@ export function ContentObjectsProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState<PlacementMode>(null);
+  const [pendingIsSignature, setPendingIsSignature] = useState(false);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({});
 
   const fetchGenerationRef = useRef(0);
@@ -195,12 +214,16 @@ export function ContentObjectsProvider({ children }: { children: ReactNode }) {
       });
   }, [doc, view.currentPage]);
 
-  const startPlacing = useCallback((mode: Exclude<PlacementMode, null>) => {
+  const startPlacing = useCallback((mode: Exclude<PlacementMode, null>, opts?: { signatureDefaults?: boolean }) => {
     setSelectedId(null);
     setPlacementMode(mode);
+    setPendingIsSignature(!!opts?.signatureDefaults);
   }, []);
 
-  const cancelPlacing = useCallback(() => setPlacementMode(null), []);
+  const cancelPlacing = useCallback(() => {
+    setPlacementMode(null);
+    setPendingIsSignature(false);
+  }, []);
 
   /** Every mutation follows the same shape: set busy, call the real
    * endpoint, apply its OperationResult to useWorkingDocument (so Undo/Redo
@@ -236,36 +259,40 @@ export function ContentObjectsProvider({ children }: { children: ReactNode }) {
     async (box: ContentBox, params: TextObjectParams) => {
       if (!doc || placementMode === null) return;
       const page = view.currentPage;
+      const finalParams = pendingIsSignature ? { ...params, isSignature: true } : params;
       try {
         const result =
           placementMode === "editText"
             ? await runMutating(() =>
-                createOverlayTextEdit(doc.id, { page, ...box, params, coverOriginal: box }),
+                createOverlayTextEdit(doc.id, { page, ...box, params: finalParams, coverOriginal: box }),
               )
-            : await runMutating(() => createTextObject(doc.id, { page, ...box, params }));
+            : await runMutating(() => createTextObject(doc.id, { page, ...box, params: finalParams }));
         setPlacementMode(null);
+        setPendingIsSignature(false);
         selectObject(result.objectId, placementMode === "editText" ? "text_overlay_edit" : "text");
       } catch {
         // runMutating already recorded the error; placement stays open so
         // the user can retry rather than losing their typed text.
       }
     },
-    [doc, placementMode, view.currentPage, runMutating, selectObject],
+    [doc, placementMode, pendingIsSignature, view.currentPage, runMutating, selectObject],
   );
 
   const createImage = useCallback(
     async (page: number, box: ContentBox, file: File) => {
       if (!doc) return;
+      const isSignature = pendingIsSignature;
       try {
-        const result = await runMutating(() => createImageObject(doc.id, { page, ...box, file }));
+        const result = await runMutating(() => createImageObject(doc.id, { page, ...box, file, isSignature }));
         setImagePreviewUrls((prev) => ({ ...prev, [result.objectId]: URL.createObjectURL(file) }));
         setPlacementMode(null);
+        setPendingIsSignature(false);
         selectObject(result.objectId, "image");
       } catch {
         // runMutating already recorded the error.
       }
     },
-    [doc, runMutating, selectObject],
+    [doc, pendingIsSignature, runMutating, selectObject],
   );
 
   const patchSelected = useCallback(
@@ -309,6 +336,7 @@ export function ContentObjectsProvider({ children }: { children: ReactNode }) {
     error,
     imagePreviewUrls,
     placementMode,
+    pendingIsSignature,
     startPlacing,
     cancelPlacing,
     commitTextPlacement,
