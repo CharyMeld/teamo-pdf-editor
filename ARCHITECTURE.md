@@ -102,7 +102,7 @@ stating its responsibility, what it owns, and its Phase 0 status.
 | Compression | Scaffolded | Phase (Compress) |
 | Forms | Scaffolded, no schema | Phase (Forms) |
 | Signatures | Scaffolded, no schema | Phase (Sign) |
-| Ai | Scaffolded, no schema | Phase (AI) — local Ollama only, never an external AI service |
+| Ai | Provider abstraction built (no provider yet), no schema | Phase 12.2 — external providers (Anthropic/OpenAI/Google), disabled by default; supersedes this row's original "local Ollama only" note, see Phase 12.1/12.2 sections below |
 | Search | Scaffolded, no schema | Phase (Search) |
 | Jobs | Schema + model (job tracking) | As each processing module ships |
 | Settings | Schema + model | As features need runtime config |
@@ -2864,3 +2864,133 @@ freehand tool already provides real, final-scale, final-position
 drawing — arguably a better UX than a separate pad requiring a second
 placement/scaling step). Any UI for `sign.request`/`sign.certificate`
 (both stay unavailable). No AI.
+
+## Phase 12.1 — AI architecture audit (2026-09-19)
+
+A pure investigation phase, no code changes, following a 15-stage AI
+Document Intelligence spec (`PHASE 12 — AI DOCUMENT INTELLIGENCE.md`,
+untracked at the repo root like `The implementation order.md`). Full
+findings below fed directly into Phase 12.2's design; the most
+consequential ones:
+
+- **No server-side per-page text extraction exists anywhere.** Two
+  independent mechanisms exist today, neither queryable: the frontend
+  builds its search index purely client-side via pdf.js's
+  `getTextContent()` (`useOpenDocument.tsx`), and Phase 7's OCR splices
+  recognized text directly into the PDF's own content stream (a real
+  invisible text layer) without ever persisting it to the database.
+  Since the browser must never call an AI provider directly, a future
+  document-context engine (Phase 12.5) has to build its own server-side
+  per-page extraction from scratch.
+- **`pdftotext` is already a real backend dependency** (`ConversionEngine::toText()`,
+  Phase 8, via poppler-utils) — currently whole-document only, but
+  `-f`/`-l` page-range flags make per-page extraction a small, precedented
+  extension rather than a new dependency.
+- **Two unused-but-real pieces of infrastructure are ready to reuse**:
+  the `settings` table (`App\Models\Setting`, schema exists, zero
+  usages anywhere) is the natural home for AI enable/disable/default-
+  provider/credentials; `AuditLog`/`AuditLogger::record()` (already
+  wired into every existing domain service) is a ready-made sink for
+  AI audit logging — no new tables needed for either.
+- **No encryption infrastructure exists** (`Crypt::` has zero usages in
+  the codebase) — Phase 12.3's credential storage requirement is
+  genuinely new plumbing, not a gap in an existing pattern.
+- **A real conflict, resolved with the project owner**: Phase 0 had
+  scaffolded `app/Domain/Ai/MODULE.md` and this file's own module table
+  with a stated rule — AI "local Ollama only, never an external AI
+  service." The actual Phase 12 spec explicitly wants external
+  providers (Anthropic/OpenAI/Google) and explicitly excludes Ollama.
+  Confirmed with the project owner (2026-09-19): the Phase 0 note was
+  early speculation, not a real constraint, and is superseded — the new
+  spec's own built-in safeguards (disabled-by-default, consent prompts
+  before sending content, prompt-injection defense) are the actual
+  current design. See `app/Domain/Ai/MODULE.md` for the full note.
+
+## Phase 12.2 (backend) — AI provider abstraction layer (2026-09-19)
+
+Builds only the internal, provider-independent abstraction the spec
+asked for — no Claude/OpenAI/Gemini/Ollama call anywhere, no document
+content sent anywhere, no AI workspace UI. Structure, in
+`app/Domain/Ai/`: `Contracts/AiProviderInterface` (the only thing
+`Services/AiService` depends on) → `Services/AiProviderRegistry`
+(resolves an identifier to a concrete adapter via `config('ai.providers')`,
+an identifier-to-FQCN map that starts empty) → a future provider
+adapter (Phase 12.4+). `Services/AiService` is the single call-through
+point every future controller/job must use — nothing above this layer
+should ever reference a provider adapter class or `config('ai.providers')`
+directly, which is what lets "Anthropic/OpenAI/Google/other providers
+without rewriting the AI workspace" hold in practice, not just in
+principle.
+
+**DTOs** (`DTO/`, all `final readonly class`): `AiProviderConfig`,
+`AiTextRequest`/`AiStructuredRequest` (system/user prompts kept as
+separate fields all the way down, never pre-concatenated, so Phase
+12.5/12.11's SYSTEM/USER/DOCUMENT separation has one obvious
+enforcement point instead of an unrecoverable-by-then string), `AiResponse`/
+`AiUsage`, `AiModelInfo`, `AiProviderCapabilities`, `AiConnectionResult`.
+
+**Error taxonomy**: `Enums\AiErrorCode` (the spec's 9-case request-time
+taxonomy) and `Enums\AiConnectionStatus` (the spec's smaller Phase-
+12.3-facing connection-test taxonomy) back `app/Exceptions/AiException`
+(alongside every other domain's exceptions, extending the same
+`DomainException` base `OcrException`/`ConversionException`/etc.
+already use). "Error normalization" is deliberately not a method on
+`AiProviderInterface` — it's every adapter's own responsibility to
+catch its SDK/HTTP errors and throw the shared `AiException`, not a
+redundant extra interface method.
+
+**A real gotcha found only by actually running the test suite**: PHP's
+built-in `Exception` class already declares a non-readonly `$code`
+property — declaring `public readonly AiErrorCode $code` in
+`AiException`'s constructor is a fatal error ("Cannot redeclare
+non-readonly property Exception::$code as readonly"), not a warning.
+Fixed by naming it `$errorCode` instead. **Reusable lesson: never name
+a custom exception property `$code` without checking against PHP's own
+base `Exception` class first.**
+
+**Every `AiException` factory takes a pre-sanitized `$detail` string**,
+never a raw provider exception/response to format internally —
+deliberately no generic `AiException::fromProvider(Throwable $e)`
+shape, since that would invite forwarding an unsanitized message
+containing a credential. Verified with a real test
+(`test_ai_exception_never_leaks_a_raw_secret`) that constructs a
+simulated upstream failure string containing a fake secret and asserts
+the resulting exception's message never contains it.
+
+**Config**: new `config/ai.php`, following `config/documents.php`'s
+existing style — `'enabled' => env('AI_ENABLED', false)` and an empty
+`'providers'` map with commented-out example entries. No migration —
+Phase 12.1 already identified the unused `settings` table as the home
+for actual enable/disable/credentials persistence, which is Phase
+12.3's job.
+
+### Testing — the first phase to add real PHPUnit tests
+
+Every prior phase (3-11) verified purely via manual curl/tinker/
+Playwright against the live stack — appropriate when there's live UI
+behavior to click through, but Phase 12.2 has no server-visible
+behavior at all (an abstraction with no registered provider). A
+test-only `Tests\Support\FakeAiProvider` (never referenced by
+`config/ai.php` or any production code path — a standard interface
+test double, not "placeholder AI functionality" in the product) backs
+`tests/Unit/Domain/Ai/AiServiceTest.php`, which proves: `AiService`
+throws a normalized `AiException` (`PROVIDER_UNAVAILABLE`) whenever AI
+is disabled or a provider identifier is unregistered — the real,
+tested mechanism behind "the app must work with AI completely
+disabled" — correct delegation for `generateText()`/`testConnection()`,
+the secret-redaction property above, and every `AiErrorCode`'s mapped
+HTTP status. `./vendor/bin/phpunit` passes 10/10 (8 new + the 2
+pre-existing default Laravel example stubs, run for the first time this
+session and confirmed genuinely working, not just present).
+
+Verified against the live stack: `php artisan route:list` shows zero
+route changes (12.2 adds none — that's 12.3+), and a real dev-login +
+`GET /api/documents` round-trip confirms existing PDF functionality is
+completely unaffected.
+
+### What Phase 12.2 does NOT include
+
+Any real provider (Anthropic is Phase 12.4). Any route, controller, or
+frontend code (nothing yet calls `AiService` from outside its own
+tests). Any credential storage/encryption (Phase 12.3). Any document
+content handling of any kind.
