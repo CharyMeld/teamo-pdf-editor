@@ -1,4 +1,5 @@
 import AppHeader from "../components/layout/AppHeader";
+import AiSettingsDialog from "../components/dialogs/AiSettingsDialog";
 import CompressDialog from "../components/dialogs/CompressDialog";
 import CreatePdfFromImagesDialog from "../components/dialogs/CreatePdfFromImagesDialog";
 import CropDialog from "../components/dialogs/CropDialog";
@@ -39,6 +40,7 @@ export default function WorkspacePage() {
       <ExportDialog />
       <OfficeToPdfDialog />
       <CompressDialog />
+      <AiSettingsDialog />
     </WorkspaceProviders>
   );
 }

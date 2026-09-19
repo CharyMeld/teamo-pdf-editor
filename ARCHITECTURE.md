@@ -102,10 +102,10 @@ stating its responsibility, what it owns, and its Phase 0 status.
 | Compression | Scaffolded | Phase (Compress) |
 | Forms | Scaffolded, no schema | Phase (Forms) |
 | Signatures | Scaffolded, no schema | Phase (Sign) |
-| Ai | Provider abstraction built (no provider yet), no schema | Phase 12.2 — external providers (Anthropic/OpenAI/Google), disabled by default; supersedes this row's original "local Ollama only" note, see Phase 12.1/12.2 sections below |
+| Ai | Provider abstraction + settings/credentials built (no provider yet) | Phase 12.3 — `ai_provider_credentials` table + first real use of the `settings` table; external providers (Anthropic/OpenAI/Google), disabled by default; supersedes this row's original "local Ollama only" note, see Phase 12.1-12.3 sections below |
 | Search | Scaffolded, no schema | Phase (Search) |
 | Jobs | Schema + model (job tracking) | As each processing module ships |
-| Settings | Schema + model | As features need runtime config |
+| Settings | Schema + model, first real usage | Phase 12.3 — AI's enabled/external-processing/default-provider toggles, via `AiSettingsService` |
 | Audit | Schema + model | Phase 1 (`document.uploaded` is the first write) |
 
 ## API / service boundary rule
@@ -2994,3 +2994,114 @@ Any real provider (Anthropic is Phase 12.4). Any route, controller, or
 frontend code (nothing yet calls `AiService` from outside its own
 tests). Any credential storage/encryption (Phase 12.3). Any document
 content handling of any kind.
+
+## Phase 12.3 — AI provider settings (2026-09-19)
+
+The settings surface the spec asked for: enable/disable AI,
+enable/disable *external* processing, a default provider, and
+per-provider credential storage/testing — all still with zero real
+provider adapters (Anthropic ships in 12.4) and no credential ever
+reaching the browser.
+
+**First real usage of the `settings` table** (schema existed since
+Phase 0, confirmed unused by Phase 12.1's audit): `AiSettingsService`
+stores three scalar rows (`ai.enabled`, `ai.external_processing_enabled`,
+`ai.default_provider`) rather than one JSON blob, so each is
+independently queryable. `AiService::isEnabled()` now delegates here,
+falling back to `config('ai.enabled')` when no row exists yet — this
+is what kept Phase 12.2's `AiServiceTest` (which sets
+`config(['ai.enabled' => ...])` directly and never touches this table)
+passing completely unmodified.
+
+**A real DB gotcha, caught only by running the tests**: `settings.value`
+is a `NOT NULL` JSON column (Phase 0's original schema). Writing a
+real SQL `NULL` to represent "no default provider selected" fails at
+the DB level — Eloquent's `array`/JSON cast passes a PHP `null`
+straight through as a raw `NULL` write rather than encoding it as the
+JSON literal `null`. Fixed by deleting the row instead when the value
+is null, which is also the more correct representation: "no row" was
+already this class's convention for "unset" on the read side.
+
+**New table**: `ai_provider_credentials` (`App\Models\AiProviderCredential`)
+— one row per user+provider, `api_key` encrypted at rest via Laravel's
+built-in `'encrypted'` model cast (no new crypto code, uses the app's
+existing `APP_KEY` — the first real use of encryption anywhere in this
+codebase). `AiCredentialService` is the only code that reads/writes
+it. `config('ai.known_providers')` is a **display/validation catalog**
+(Anthropic/OpenAI/Google display names), deliberately separate from
+`config('ai.providers')`'s adapter map from Phase 12.2 — it lets the
+settings UI accept and store a credential for a provider before its
+adapter exists. Testing a stored credential for a provider not yet
+registered honestly returns `AiConnectionStatus::PROVIDER_UNAVAILABLE`
+(verified via a real Playwright run against the live stack, not
+assumed), never a faked success.
+
+Every controller response (`AiSettingsController`) is hand-built, never
+a serialized model — `api_key` structurally cannot leak through it
+regardless of the model's own `$hidden` (added anyway, as
+defense-in-depth). Every mutating action calls the existing
+`AuditLogger::record()` (Phase 0 infrastructure, first given real
+callers back in Phase 1, reused as-is here) with a `provider` context
+only, never a key fragment.
+
+### Frontend
+
+A plain CRUD provider (`useAiSettings.tsx`, not document-scoped —
+account-level settings) and `AiSettingsDialog.tsx` (built on the
+existing `Dialog` primitive): global toggles, a default-provider
+select, and one credential row per known provider with a password-type
+key input that always starts empty and is cleared again after
+save/test (never holds a stored key, since the backend never returns
+one). Opened from `AppHeader`'s app-menu "Settings" item, which had
+existed since an earlier phase as a disabled placeholder wired to the
+wrong command (`home.properties`) — now real and correctly wired.
+
+**The exact same checkbox-snap-back bug [[phase6_scanning_findings]]
+and Phase 10 already documented, re-confirmed a third time**: a
+checkbox bound directly to server-derived state (`checked={settings.enabled}`)
+visibly reverts for the duration of its PATCH round-trip — caught by a
+real Playwright `.check()` failing with "did not change its state."
+Fixed with the same optimistic local-state overlay pattern, this time
+reset on the dialog's own open/close boundary (there's no per-item
+selection here, just one global settings object, unlike the form-field
+panels this pattern was built for).
+
+### Testing
+
+The project's first tests to touch the database — `phpunit.xml` has no
+separate test database configured, so every new test uses
+`Illuminate\Foundation\Testing\DatabaseTransactions` to leave the
+shared dev MySQL database exactly as it found it. 18 new backend tests
+(settings round-trips, credential encryption/removal/catalog listing,
+controller-level key-never-echoed assertions) plus Phase 12.2's
+existing 10 — all 28 passing. Verified against the live stack via curl
+(enable → store → verify-never-echoed → test → PROVIDER_UNAVAILABLE →
+remove) and a full Playwright pass (open the app menu, open AI
+Settings, toggle Enable AI, save a fake Anthropic key, Test Connection,
+reload the page and confirm persistence without ever seeing the key
+again, remove it, then open a real PDF and confirm the rest of the app
+— viewer, thumbnails, properties — is completely unaffected).
+
+**A real cross-phase isolation gap, found by actually re-running the
+whole suite, not just the new tests**: `AiService::isEnabled()` now
+transitively reads the `settings` table (via `AiSettingsService`), so
+Phase 12.2's pre-existing `AiServiceTest` — written before this table
+was touched, and never wrapped in `DatabaseTransactions` — started
+failing once a real `ai.enabled = false` row, left behind by this
+phase's own manual curl/Playwright smoke-testing against the shared
+dev database, began shadowing every `config(['ai.enabled' => ...])`
+call those tests make. Fixed by cleaning the leftover rows and adding
+`DatabaseTransactions` to `AiServiceTest` too. **Reusable lesson: when
+a change makes a previously DB-free class start touching a table
+(directly or transitively), any EXISTING test for that class needs the
+same DB-isolation trait added retroactively — not just new tests for
+new code.**
+
+### What Phase 12.3 does NOT include
+
+Any real provider connection (every test result here is honestly
+`PROVIDER_UNAVAILABLE` — Anthropic is Phase 12.4). Consent prompts
+before sending document content (Phase 12.13). Multi-user credential
+isolation beyond the schema already supporting it (`user_id` on
+`ai_provider_credentials` — this app still has exactly one seeded
+user). Any document content handling of any kind.

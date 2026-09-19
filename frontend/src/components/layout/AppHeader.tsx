@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import teamoLogo from "../../assets/teamo-logo.png";
-import { getCommand } from "../../commands/registry";
+import { useAiSettings } from "../../ai/useAiSettings";
 import { useCommandSearch } from "../../commands/useCommandSearch";
 import { useActiveTab } from "../../hooks/useActiveTab";
 import { useOpenDocument } from "../../hooks/useOpenDocument";
@@ -177,7 +177,7 @@ export default function AppHeader() {
   const { setActiveTab } = useActiveTab();
   const { showOpenDialog } = useOpenDocument();
   const organize = useOrganizeRunHandlers();
-  const settingsCommand = getCommand("home.properties");
+  const aiSettings = useAiSettings();
 
   const runHandlers: Record<string, () => void> = {
     "home.open": showOpenDialog,
@@ -207,10 +207,8 @@ export default function AppHeader() {
           items={[
             {
               id: "app.settings",
-              label: "Settings",
-              disabled: true,
-              disabledHint: "Not yet available",
-              onSelect: settingsCommand?.run,
+              label: "AI Settings",
+              onSelect: aiSettings.openDialog,
             },
           ]}
           renderTrigger={(triggerProps) => (

@@ -1097,3 +1097,73 @@ export function fillFormValues(id: string, values: Record<string, unknown>): Pro
 export function clearFormValues(id: string, fieldKeys?: string[]): Promise<OperationResult> {
   return api.post<OperationResult>(`/documents/${id}/form/clear`, { fieldKeys }).then((r) => r.data);
 }
+
+// ---- Phase 12.3: AI provider settings ----------------------------------
+// Not document-scoped, unlike everything above — these are account-level.
+// The backend never returns a stored API key in any response (see
+// AiSettingsController's docblock); this client never has one to hold.
+
+export interface AiProviderSettingsSummary {
+  identifier: string;
+  displayName: string;
+  configured: boolean;
+  enabled: boolean;
+  model: string | null;
+  lastTestedAt: string | null;
+  lastTestStatus: string | null;
+  lastTestMessage: string | null;
+}
+
+export interface AiSettings {
+  enabled: boolean;
+  externalProcessingEnabled: boolean;
+  defaultProvider: string | null;
+  providers: AiProviderSettingsSummary[];
+}
+
+export type AiConnectionStatus =
+  | "CONNECTED"
+  | "AUTHENTICATION_FAILED"
+  | "PROVIDER_UNAVAILABLE"
+  | "INVALID_CONFIGURATION"
+  | "MODEL_UNAVAILABLE"
+  | "UNKNOWN_ERROR";
+
+export interface AiConnectionTestResult {
+  status: AiConnectionStatus;
+  message: string;
+  availableModels: { id: string; label: string }[];
+}
+
+export async function getAiSettings(): Promise<AiSettings> {
+  const { data } = await api.get<AiSettings>("/ai/settings");
+  return data;
+}
+
+export async function updateAiSettings(
+  patch: Partial<Pick<AiSettings, "enabled" | "externalProcessingEnabled" | "defaultProvider">>,
+): Promise<AiSettings> {
+  const { data } = await api.patch<AiSettings>("/ai/settings", patch);
+  return data;
+}
+
+export async function putAiProviderCredential(
+  provider: string,
+  input: { apiKey: string; model?: string | null },
+): Promise<AiSettings> {
+  const { data } = await api.put<AiSettings>(`/ai/settings/providers/${provider}/credentials`, input);
+  return data;
+}
+
+export async function deleteAiProviderCredential(provider: string): Promise<AiSettings> {
+  const { data } = await api.delete<AiSettings>(`/ai/settings/providers/${provider}/credentials`);
+  return data;
+}
+
+export async function testAiProviderConnection(
+  provider: string,
+  draft?: { apiKey?: string; model?: string | null },
+): Promise<AiConnectionTestResult> {
+  const { data } = await api.post<AiConnectionTestResult>(`/ai/settings/providers/${provider}/test`, draft ?? {});
+  return data;
+}
