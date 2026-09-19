@@ -893,3 +893,74 @@ export async function convertOfficeToPdf(file: File): Promise<DocumentSummary> {
   const { data } = await api.post<{ document: DocumentSummary }>("/office-conversions", form);
   return data.document;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 9 — PDF and file compression. Queued and polled exactly like
+// Phase 8's conversions. By default the result is a standalone
+// downloadable file (the currently-open document is never touched); an
+// explicit "replace" call is what commits it into the working copy — see
+// CompressionService's docblock server-side.
+
+export type CompressionFormat = "pdf" | "zip";
+export type CompressionPreset = "maxQuality" | "balanced" | "maxCompression" | "custom";
+export type CompressionJobStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface CompressionCustomOptions {
+  imageDpi?: number;
+  imageQuality?: number;
+  imageFormat?: "jpeg" | "lossless";
+  subsetFonts?: boolean;
+}
+
+export interface CompressionResult {
+  format: CompressionFormat;
+  outputPath: string;
+  downloadFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  originalSizeBytes: number;
+  /** Null for a "zip" result — wrapping an already-compressed PDF stream in a zip barely changes size, so a percentage here would mislead more than inform. */
+  percentReduction: number | null;
+  pageCount: number;
+  preset?: CompressionPreset;
+}
+
+export interface CompressionJobState {
+  status: CompressionJobStatus;
+  progressPercent: number | null;
+  errorMessage: string | null;
+  payload: CompressionResult | null;
+}
+
+export async function startCompression(
+  id: string,
+  format: CompressionFormat,
+  preset: CompressionPreset | undefined,
+  custom: CompressionCustomOptions | undefined,
+  removeMetadata: boolean,
+  cleanupUnusedObjects: boolean,
+): Promise<{ jobId: number }> {
+  const { data } = await api.post<{ jobId: number }>(`/documents/${id}/compressions`, {
+    format,
+    preset,
+    custom,
+    removeMetadata,
+    cleanupUnusedObjects,
+  });
+  return data;
+}
+
+export async function getCompressionJob(id: string, jobId: number): Promise<CompressionJobState> {
+  const { data } = await api.get<CompressionJobState>(`/documents/${id}/compressions/jobs/${jobId}`);
+  return data;
+}
+
+export function compressionDownloadUrl(id: string, jobId: number): string {
+  return `${API_BASE_URL}/documents/${id}/compressions/jobs/${jobId}/download`;
+}
+
+/** Commits an already-completed compression result into the working copy — a normal, undoable pending edit, not an immediate overwrite. */
+export async function replaceWithCompression(id: string, jobId: number): Promise<OperationResult> {
+  const { data } = await api.post<OperationResult>(`/documents/${id}/compressions/jobs/${jobId}/replace`);
+  return data;
+}

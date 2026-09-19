@@ -8,6 +8,7 @@ import { OpenDocumentProvider } from "../hooks/useOpenDocument";
 import { PageSelectionProvider } from "../hooks/usePageSelection";
 import { PanelVisibilityProvider } from "../hooks/usePanelVisibility";
 import { WorkingDocumentProvider } from "../hooks/useWorkingDocument";
+import { CompressionWorkflowProvider } from "../compression/useCompressionWorkflow";
 import { ConversionWorkflowProvider } from "../conversion/useConversionWorkflow";
 import { OcrWorkflowProvider } from "../ocr/useOcrWorkflow";
 import { ScanWorkflowProvider } from "../scanning/useScanWorkflow";
@@ -45,7 +46,12 @@ export default function WorkspaceProviders({ children }: { children: ReactNode }
                             (pageCount), and page selection (images-format
                             scope). */}
                         <ConversionWorkflowProvider>
-                          <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                          {/* Phase 9 (compression): only needs the open
+                              document + working copy (applyOperationResult
+                              for "replace") — no page selection. */}
+                          <CompressionWorkflowProvider>
+                            <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                          </CompressionWorkflowProvider>
                         </ConversionWorkflowProvider>
                       </OcrWorkflowProvider>
                     </PageSelectionProvider>

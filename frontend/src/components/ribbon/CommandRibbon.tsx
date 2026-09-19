@@ -8,6 +8,7 @@ import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useWorkingDocument } from "../../hooks/useWorkingDocument";
+import { useCompressionWorkflow } from "../../compression/useCompressionWorkflow";
 import { useConversionWorkflow } from "../../conversion/useConversionWorkflow";
 import { useOcrWorkflow } from "../../ocr/useOcrWorkflow";
 import { useScanWorkflow } from "../../scanning/useScanWorkflow";
@@ -63,6 +64,7 @@ export default function CommandRibbon() {
   const scanWorkflow = useScanWorkflow();
   const ocrWorkflow = useOcrWorkflow();
   const conversionWorkflow = useConversionWorkflow();
+  const compressionWorkflow = useCompressionWorkflow();
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const [sheetOpen, setSheetOpen] = useState(false);
   useUndoRedoShortcuts();
@@ -89,6 +91,10 @@ export default function CommandRibbon() {
     "convert.toImage": () => conversionWorkflow.openDialog("images"),
     "convert.toWord": () => conversionWorkflow.openDialog("docx"),
     "convert.fromOffice": conversionWorkflow.openOfficeDialog,
+    "compress.maxQuality": () => compressionWorkflow.openDialog("maxQuality"),
+    "compress.standard": () => compressionWorkflow.openDialog("balanced"),
+    "compress.strong": () => compressionWorkflow.openDialog("maxCompression"),
+    "compress.custom": () => compressionWorkflow.openDialog("custom"),
     ...organize.runHandlers,
     ...contentEditor.runHandlers,
     ...annotations.runHandlers,
@@ -105,6 +111,10 @@ export default function CommandRibbon() {
           "convert.toText": "No document open",
           "convert.toImage": "No document open",
           "convert.toWord": "No document open",
+          "compress.maxQuality": "No document open",
+          "compress.standard": "No document open",
+          "compress.strong": "No document open",
+          "compress.custom": "No document open",
         }),
     ...organize.disabledReasons,
     ...contentEditor.disabledReasons,

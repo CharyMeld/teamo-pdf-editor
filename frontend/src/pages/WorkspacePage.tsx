@@ -1,4 +1,5 @@
 import AppHeader from "../components/layout/AppHeader";
+import CompressDialog from "../components/dialogs/CompressDialog";
 import CreatePdfFromImagesDialog from "../components/dialogs/CreatePdfFromImagesDialog";
 import CropDialog from "../components/dialogs/CropDialog";
 import ExportDialog from "../components/dialogs/ExportDialog";
@@ -37,6 +38,7 @@ export default function WorkspacePage() {
       <OcrResultsPanel />
       <ExportDialog />
       <OfficeToPdfDialog />
+      <CompressDialog />
     </WorkspaceProviders>
   );
 }

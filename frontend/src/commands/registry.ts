@@ -576,13 +576,24 @@ export const REGISTRY: Command[] = [
 
   // ---- COMPRESS --------------------------------------------------------------
   {
+    id: "compress.maxQuality",
+    label: "Compress (Maximum Quality)",
+    description: "Minimal size reduction, best visual quality",
+    tab: "COMPRESS",
+    group: "Reduce Size",
+    keywords: ["high quality", "light compression"],
+    // Real as of Phase 9 (compression) — see
+    // compression/useCompressionWorkflow and CompressDialog.
+    status: "available",
+  },
+  {
     id: "compress.standard",
     label: "Compress (Standard)",
     description: "Reduce file size with balanced quality",
     tab: "COMPRESS",
     group: "Reduce Size",
-    keywords: ["shrink", "optimize", "reduce file size"],
-    status: UNIMPLEMENTED,
+    keywords: ["shrink", "optimize", "reduce file size", "balanced"],
+    status: "available",
   },
   {
     id: "compress.strong",
@@ -590,8 +601,17 @@ export const REGISTRY: Command[] = [
     description: "Maximize file size reduction",
     tab: "COMPRESS",
     group: "Reduce Size",
-    keywords: ["shrink more", "aggressive compression"],
-    status: UNIMPLEMENTED,
+    keywords: ["shrink more", "aggressive compression", "maximum compression"],
+    status: "available",
+  },
+  {
+    id: "compress.custom",
+    label: "Compress (Custom)",
+    description: "Choose image DPI, quality, metadata, and cleanup options",
+    tab: "COMPRESS",
+    group: "Reduce Size",
+    keywords: ["custom compression", "dpi", "image quality"],
+    status: "available",
   },
 
   // ---- SIGN --------------------------------------------------------------

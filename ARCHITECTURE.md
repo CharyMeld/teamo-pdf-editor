@@ -2265,3 +2265,181 @@ these are real files handed off via a normal browser download, not
 something to keep re-reading in the app (unlike Phase 7's OCR text, which
 was already loaded client-side via pdf.js). No compression, signing, AI,
 or forms.
+
+## Phase 9 (backend) — PDF and file compression engine (2026-09-19)
+
+COMPRESS's four presets (Maximum Quality, Balanced, Maximum Compression,
+Custom) plus a general file-compression option are now real. By default,
+compression produces a **standalone downloadable file** — the
+currently-open document is never touched — mirroring Phase 8's
+`ConversionService` pattern exactly. An explicit **Replace original**
+action is what commits the already-produced compressed file into the
+working copy, via `WorkingCopyManager::commitStep()` reused verbatim (the
+same call Phase 7's OCR already uses) — a normal, undoable pending edit,
+not an immediate overwrite. This maps the brief's "never overwrite the
+original unless the user explicitly chooses to replace it" directly onto
+the app's existing edit lifecycle rather than inventing a new concept.
+
+### Real engine research, done before writing any code
+
+A real 5.8MB, 3-page, image-heavy test PDF was built and run through
+every candidate technique before this was designed:
+
+- **Ghostscript 10.02.1** (`gs`, already a dependency — `PdfPageEngine`
+  already uses it for crop/blank-page) via its Distiller-compatible
+  `-dPDFSETTINGS` presets: `/prepress` → 4.69MB, `/ebook` → 545KB,
+  `/screen` → 140KB. All verified `qpdf --check`-clean, correct page
+  count preserved.
+- **A real, non-obvious Ghostscript gotcha caught only by testing**:
+  `-dColorImageResolution=<dpi>` alone does *not* guarantee real
+  downsampling — gs's `DownsampleThreshold` defaults to 1.5, meaning it
+  silently skips downsampling whenever the source is under 1.5× the
+  requested target. A real 141-PPI test image survived a "100 DPI"
+  request completely untouched (confirmed via `pdfimages -list`: identical
+  pixel dimensions before and after) until
+  `-dColorImageDownsampleThreshold=1.0`/`-dGrayImageDownsampleThreshold=1.0`
+  were added — after which the same request genuinely resampled the image
+  and took a real 1.4MB test document down to 190KB (an 87% reduction).
+  This was caught and fixed *after* an initial implementation shipped
+  functionally-inert custom-DPI behavior, verified via a live API call —
+  a reminder that "gs exited 0 and produced a smaller-looking number" is
+  not the same as "the control did what the user asked."
+- **Metadata removal**: the commonly-documented `-c "... pdfmark" -f
+  file.pdf` invocation form does **not** work — verified directly (Title/
+  Author survived unchanged on a document with distinctly non-default
+  values). The real, working form passes the pdfmark snippet as a
+  **separate file argument, processed after the source PDF**:
+  `gs ... -sOutputFile=out.pdf source.pdf strip.ps`. This ordering is easy
+  to get silently wrong (both forms exit 0 with no error) and must be
+  preserved exactly — see `CompressionEngine::stripMetadata()`.
+- **Font optimization** (`-dSubsetFonts`/`-dCompressFonts`) is already
+  gs's pdfwrite default for every preset — the honest, real control here
+  is an explicit *off*-switch, not something that must be turned on.
+- **`qpdf --object-streams=generate --remove-unreferenced-resources=yes`**
+  (already core) is a real, safe, independent second pass — verified as a
+  genuine additional reduction beyond gs alone, `qpdf --check` clean. This
+  is the real "unused-object cleanup" control.
+
+No fake "estimated result" is computed: the brief's "after analysis,
+display an estimated result" is satisfied by actually running the real
+compression as a queued job (so the UI stays responsive) and showing the
+genuine before/after numbers once it completes — the same "no fake data"
+principle as Phase 4's `AVAILABLE_FONTS` and Phase 7's
+`installedLanguages()`.
+
+### `CompressionEngine` / `CompressionService`
+
+`CompressionEngine` (`app/Domain/Compression/Services/`) follows the
+`Process::timeout()->run()` convention every engine class in this app
+uses, with every method verifying its output via a real `pdfinfo` probe —
+not trusting gs's exit code alone, the same lesson `ConversionEngine::officeToPdf()`
+already encodes for wkhtmltopdf.
+
+`CompressionService` mirrors `ConversionService`'s shape: reads the
+document's CURRENT working state via `WorkingCopyManager::currentAbsolutePath()`
+(so compression reflects pending unsaved edits, same source Phase 7's OCR
+reads from), runs preset-or-custom compression → optional metadata strip
+→ optional qpdf cleanup pass as real sequential stages (honest 25/50/75/100-style
+progress, not fake per-page ticks), and writes the result under
+`{uuid}/compressions/{job id}/output.pdf`. The payload carries real
+`filesize()`-derived `sizeBytes`/`originalSizeBytes`/`percentReduction` —
+the exact before/after numbers the brief asks for.
+
+`replace()` is the explicit opt-in: given an already-`completed` job, it
+resolves the already-produced file's absolute path and calls
+`WorkingCopyManager::commitStep($document, $user, 'compress', ..., $absolutePath, $pageCount)`
+directly — no re-compression, no new "replace" concept, just this app's
+existing pending-edit mechanism.
+
+### General file compression — PDF → ZIP real, the rest prepared-for
+
+`format: 'zip'` reuses `ConversionEngine::zipFiles()` **verbatim** (Phase
+8) rather than duplicating `ZipArchive` logic. Multi-file/folder/
+document-collection ZIP (also named in the brief) is explicitly
+**prepared for, not built**: `zipFiles()` already takes a list of
+absolute paths, so a future Document Management phase (13 — the natural
+home for a real multi-document-selection UI) can call it directly with no
+re-architecture. Building a fake multi-select UI now, with nowhere real
+for it to live yet, would be scope creep the brief doesn't ask for here.
+
+### API
+
+```
+POST /documents/{document}/compressions                     {format: 'pdf'|'zip', preset?, custom?, removeMetadata?, cleanupUnusedObjects?} -> {jobId}
+GET  /documents/{document}/compressions/jobs/{job}           -> {status, progressPercent, errorMessage, payload}
+GET  /documents/{document}/compressions/jobs/{job}/download  -> streams the real file
+POST /documents/{document}/compressions/jobs/{job}/replace   -> commits the compressed PDF into the working copy (OperationResult shape)
+```
+
+### Verified working (2026-09-19)
+
+Against the live `php artisan serve` + `queue:work` stack, via `curl`
+with a real Sanctum session and a real 1.4MB image-heavy test PDF (with
+distinctly non-default Title/Author for an unambiguous metadata-removal
+test): all four presets producing real, `qpdf --check`-clean,
+correctly-paged output with real measured reductions (Balanced 19.9%,
+Maximum Compression 91.2%, Custom-at-DPI-100/Q40 87% — after the
+downsample-threshold fix above); metadata genuinely cleared (verified via
+`pdfinfo`, not gs's own default-looking placeholder strings); the `zip`
+format producing a real, valid archive; `replace` producing a real new
+`document_edit_operations` step with `canUndo: true`, confirmed via
+direct DB inspection (`current_step_id` pointed at the new step, the
+working copy's live file size matched the compressed output exactly);
+`replace` on a `zip`-format job cleanly rejected (422); a nonexistent job
+cleanly 404s.
+
+### What Phase 9 (backend) does NOT include
+
+Multi-file/folder/document-collection ZIP (prepared for, not built — see
+above). The frontend (delivered in the same session — see below). No
+signing, AI, or forms.
+
+## Phase 9 (frontend) — real compression UI (2026-09-19)
+
+COMPRESS had only two scaffolded commands (`compress.standard`,
+`compress.strong`); the brief's four named presets required adding
+`compress.maxQuality` and `compress.custom` to the registry (missing
+entirely, the same kind of gap Phase 7/8 also found and filled). All four
+now open one shared `CompressDialog`, following the `ExportDialog`/
+`RunOcrDialog` "one dialog, several params" convention.
+
+`frontend/src/compression/useCompressionWorkflow.tsx` mirrors
+`useConversionWorkflow`'s shape (reads `useOpenDocument`/`useWorkingDocument`
+directly, real percentage progress polled from `document_jobs`) plus one
+thing conversions don't need: `replace()`, which applies the compression
+result through `working.applyOperationResult` — the exact same
+integration point every other mutating operation in this app already
+uses, so Undo/Redo and the thumbnail panel pick it up automatically with
+no new wiring.
+
+`CompressDialog` shows the real before-state (filename/original size/page
+count) up front, format (compressed PDF vs. `.zip`) and preset radios
+(the four ribbon shortcuts open this pre-selected; "Custom" expands the
+granular DPI/quality/format/font controls), metadata-removal and
+unused-object-cleanup checkboxes available for any preset, a real
+progress bar, and — once complete — the real before/after/percent-reduction
+numbers plus both a "Download" button and a "Replace original" button
+with an explicit, honest note that replacing is a normal undoable pending
+edit, not an immediate overwrite.
+
+### Testing
+
+Playwright against `google-chrome-stable`, driven against the real live
+stack end-to-end: uploaded a real 1.4MB image-heavy test PDF, ran
+"Compress (Strong)" from the COMPRESS tab with real progress and real
+before/after numbers visible (1.4MB → 126KB, 91.2%), downloaded the real
+compressed file (`context.waitForEvent("download")`, per the technique
+established in Phase 8's testing), clicked "Replace original" and
+confirmed the header's file-size display updated to the compressed size
+with "Unsaved changes" now showing, then clicked Undo and confirmed the
+display reverted to the original 1.4MB — a real, working undo of a real
+working-copy step. Separately ran "Compress (Custom)" with the `.zip`
+output option and confirmed a real, valid archive downloaded.
+
+### What Phase 9 (frontend) does NOT include
+
+Any UI for multi-file/folder/document-collection ZIP (backend-prepared
+only, per above — there is no multi-document-selection surface in this
+app yet for it to attach to). No compression cancellation (the brief
+didn't ask for it here the way it explicitly did for OCR). No signing,
+AI, or forms.
