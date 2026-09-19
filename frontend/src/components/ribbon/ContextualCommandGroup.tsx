@@ -34,6 +34,7 @@ export default function ContextualCommandGroup({
               key={command.id}
               command={command}
               onRun={runHandlers[command.id]}
+              runHandlers={runHandlers}
               disabledReason={disabledReasons[command.id]}
             />
           ))}

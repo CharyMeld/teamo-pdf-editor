@@ -67,6 +67,7 @@ export default function CommandGroup({
                   key={command.id}
                   command={command}
                   onRun={runHandlers[command.id]}
+                  runHandlers={runHandlers}
                   disabledReason={disabledReasons[command.id]}
                 />
               ))}

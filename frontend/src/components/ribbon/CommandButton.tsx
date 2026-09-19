@@ -11,6 +11,18 @@ interface CommandButtonProps {
    * whose `run` depends on component-level state (e.g. zoom). Falls back
    * to `command.run` when omitted. */
   onRun?: () => void;
+  /**
+   * Phase 15 fix: `command.dropdown[]` sub-items (e.g. Rotate Left/Right
+   * under the "Rotate" split button) are static registry data with no
+   * `run` of their own — exactly like the top-level `command` itself,
+   * they need their real handler looked up externally by id. Without
+   * this, every dropdown sub-item's `onSelect` fell back to
+   * `sub.run` (always `undefined`), so choosing it silently did
+   * nothing — a real "dead button" caught by Phase 15's own
+   * integration testing, not a hypothetical. Pass the same
+   * `runHandlers` map `CommandGroup`/`MobileCommandSheet` already hold.
+   */
+  runHandlers?: Record<string, () => void>;
   /** Compact rendering for overflow menus / mobile action sheets instead
    * of the full ribbon card. */
   compact?: boolean;
@@ -32,6 +44,7 @@ interface CommandButtonProps {
 export default function CommandButton({
   command,
   onRun,
+  runHandlers,
   compact = false,
   disabledReason,
 }: CommandButtonProps) {
@@ -122,7 +135,7 @@ export default function CommandButton({
           label: sub.label,
           disabled: sub.status !== "available",
           disabledHint: sub.status === "available" ? undefined : "Not yet available",
-          onSelect: sub.run,
+          onSelect: runHandlers?.[sub.id] ?? sub.run,
         }))}
         renderTrigger={(triggerProps) => (
           <button

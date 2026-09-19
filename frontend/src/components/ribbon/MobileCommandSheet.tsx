@@ -45,7 +45,13 @@ export default function MobileCommandSheet({
             <p className="px-2 py-3 text-xs text-text-subtle">No commands defined for {activeTab} yet.</p>
           )}
           {commands.map((command) => (
-            <CommandButton key={command.id} command={command} compact onRun={runHandlers[command.id]} />
+            <CommandButton
+              key={command.id}
+              command={command}
+              compact
+              onRun={runHandlers[command.id]}
+              runHandlers={runHandlers}
+            />
           ))}
         </div>
       </div>
