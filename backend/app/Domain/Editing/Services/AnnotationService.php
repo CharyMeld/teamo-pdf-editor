@@ -385,6 +385,10 @@ class AnnotationService
             'points' => array_map(fn (array $p) => ['x' => (float) $p['x'], 'y' => (float) $p['y']], array_values($points)),
             'color' => $color,
             'thickness' => $thickness,
+            // A drawn signature is not a new annotation type — it's this same
+            // freehand stroke, flagged so the frontend can render the
+            // "visual mark, not a cryptographic signature" honesty note.
+            'isSignature' => (bool) ($params['isSignature'] ?? false),
         ];
     }
 

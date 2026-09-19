@@ -354,6 +354,10 @@ class ContentObjectService
             'color' => $params['color'] ?? '#000000',
             'align' => $align,
             'lineSpacing' => $lineSpacing,
+            // A signature is not a new object type — it's this same text
+            // object, flagged so the frontend can render the "visual mark,
+            // not a cryptographic signature" honesty note. See Phase 11.
+            'isSignature' => (bool) ($params['isSignature'] ?? false),
         ];
 
         if ($type === 'text_overlay_edit') {
@@ -382,7 +386,11 @@ class ContentObjectService
                 throw PageOperationException::invalidImageSource();
             }
 
-            return ['storagePath' => $params['storagePath'], 'originalFilename' => $params['originalFilename'] ?? null];
+            return [
+                'storagePath' => $params['storagePath'],
+                'originalFilename' => $params['originalFilename'] ?? null,
+                'isSignature' => (bool) ($params['isSignature'] ?? false),
+            ];
         }
 
         // Unlike a page operation's scratch files, an inserted image must
@@ -393,7 +401,11 @@ class ContentObjectService
         // annotation image variant).
         $storagePath = $this->images->store($imageFile, $document, 'content-assets');
 
-        return ['storagePath' => $storagePath, 'originalFilename' => $imageFile->getClientOriginalName()];
+        return [
+            'storagePath' => $storagePath,
+            'originalFilename' => $imageFile->getClientOriginalName(),
+            'isSignature' => (bool) ($params['isSignature'] ?? false),
+        ];
     }
 
     private function assertHexColor(string $hex): void
@@ -421,6 +433,9 @@ class ContentObjectService
             return $object['params'];
         }
 
-        return ['originalFilename' => $object['params']['originalFilename'] ?? null];
+        return [
+            'originalFilename' => $object['params']['originalFilename'] ?? null,
+            'isSignature' => (bool) ($object['params']['isSignature'] ?? false),
+        ];
     }
 }

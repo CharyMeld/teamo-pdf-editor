@@ -92,7 +92,9 @@ class DocumentContentController extends Controller
 
         if ($base['type'] === 'image') {
             $request->validate(['file' => ['required', 'file', 'image']]);
-            $base['params'] = [];
+            $base['params'] = $request->validate([
+                'params.isSignature' => ['sometimes', 'boolean'],
+            ])['params'] ?? [];
 
             return $base;
         }
@@ -109,6 +111,10 @@ class DocumentContentController extends Controller
             'params.lineSpacing' => ['sometimes', 'numeric'],
             'params.coverOriginal' => [$base['type'] === 'text_overlay_edit' ? 'required' : 'sometimes', 'array'],
             'params.coverColor' => ['sometimes', 'string'],
+            // A signature is not a new object type — it's this same text
+            // object, flagged so the frontend can render the "visual mark,
+            // not a cryptographic signature" honesty note. See Phase 11.
+            'params.isSignature' => ['sometimes', 'boolean'],
         ]);
 
         return array_merge($base, $params);

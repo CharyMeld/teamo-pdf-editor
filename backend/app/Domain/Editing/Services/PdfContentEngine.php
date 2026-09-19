@@ -29,14 +29,24 @@ use Illuminate\Support\Facades\Storage;
  */
 class PdfContentEngine
 {
-    /** FPDF's three built-in core fonts — no embedding rights/licensing concerns. 'Arial' is accepted as a common alias for Helvetica. */
-    public const AVAILABLE_FONTS = ['Helvetica', 'Times', 'Courier'];
+    /**
+     * FPDF's three built-in core fonts (no embedding rights/licensing
+     * concerns) plus 'Pacifico', a real OFL-licensed cursive TrueType font
+     * bundled at resources/fonts/signature and genuinely embedded/subsetted
+     * via AddFont() below — verified with pdffonts (emb: yes, sub: yes,
+     * uni: yes), not a raster fallback. 'Arial' is accepted as a common
+     * alias for Helvetica.
+     */
+    public const AVAILABLE_FONTS = ['Helvetica', 'Times', 'Courier', 'Pacifico'];
 
     private const FONT_ALIASES = ['Arial' => 'Helvetica'];
 
+    /** Pacifico ships as a single regular weight — bold/italic have no real embedded variant, so callers must not request a style for it. */
+    private const SIGNATURE_FONT_DIR = __DIR__.'/../../../../resources/fonts/signature';
+
     /**
      * @param  array<int, list<array{objectId: string, type: string, x: float, y: float, width: float, height: float, rotation: float, zIndex: int, active: bool, params: array}>>  $objectsByPage
-     *                                                                                                                                                                                   Keyed by 1-based page number. Only `active === true` entries are drawn; inactive (soft-deleted) entries are ignored here but kept in the caller's stored array so undo/redo can resurrect them for free by pointing at an older step.
+     *                                                                                                                                                                                              Keyed by 1-based page number. Only `active === true` entries are drawn; inactive (soft-deleted) entries are ignored here but kept in the caller's stored array so undo/redo can resurrect them for free by pointing at an older step.
      */
     public function compose(string $sourcePath, string $outputPath, array $objectsByPage): void
     {
@@ -51,6 +61,12 @@ class PdfContentEngine
         // PDF (caught via `pdftotext`: "Syntax Error: No font in show").
         $pdf->SetAutoPageBreak(false);
         $pdf->SetMargins(0, 0, 0);
+        // AddFont()'s 3rd arg must be a bare filename (no slashes) — FPDF
+        // rejects any path separator in it — with the directory passed
+        // separately as the 4th arg. Registered once per document; FPDF
+        // caches by family+style internally so re-registering per object
+        // would be wasteful, not just redundant.
+        $pdf->AddFont('Pacifico', '', 'Pacifico-Regular.json', self::SIGNATURE_FONT_DIR);
 
         try {
             $pageCount = $pdf->setSourceFile($sourcePath);
@@ -115,7 +131,12 @@ class PdfContentEngine
         }
 
         $font = self::FONT_ALIASES[$params['font']] ?? $params['font'];
-        $style = ($params['bold'] ?? false ? 'B' : '').($params['italic'] ?? false ? 'I' : '');
+        // Pacifico is bundled as a single regular weight only — no bold/italic
+        // variant is embedded, so a style flag here would make FPDF throw
+        // "Undefined font" instead of silently substituting a core font.
+        $style = $font === 'Pacifico'
+            ? ''
+            : ($params['bold'] ?? false ? 'B' : '').($params['italic'] ?? false ? 'I' : '');
         $fontSize = (float) $params['fontSize'];
         [$r, $g, $b] = $this->colorFromHex($params['color'] ?? '#000000');
         $align = match ($params['align'] ?? 'left') {

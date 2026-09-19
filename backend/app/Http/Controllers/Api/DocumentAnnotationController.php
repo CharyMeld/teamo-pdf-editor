@@ -118,6 +118,11 @@ class DocumentAnnotationController extends Controller
                 'params.points.*.y' => ['required', 'numeric'],
                 'params.color' => ['sometimes', 'string'],
                 'params.thickness' => ['sometimes', 'numeric'],
+                // A drawn signature is not a new annotation type — it's this
+                // same freehand stroke, flagged so the frontend can render
+                // the "visual mark, not a cryptographic signature" honesty
+                // note. See Phase 11.
+                'params.isSignature' => ['sometimes', 'boolean'],
             ],
             'arrow' => ['params.color' => ['sometimes', 'string'], 'params.thickness' => ['sometimes', 'numeric']],
             'text_box' => [
