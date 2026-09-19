@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\DocumentAnnotationController;
 use App\Http\Controllers\Api\DocumentContentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
+use App\Http\Controllers\Api\DocumentFormController;
 use App\Http\Controllers\Api\OcrController;
 use App\Http\Controllers\Api\OfficeConversionController;
 use App\Http\Controllers\Api\ScanSessionController;
@@ -96,6 +97,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/documents/{document}/annotations/{annotationId}', [DocumentAnnotationController::class, 'update']);
     Route::delete('/documents/{document}/annotations/{annotationId}', [DocumentAnnotationController::class, 'destroy']);
     Route::post('/documents/{document}/annotations/{annotationId}/duplicate', [DocumentAnnotationController::class, 'duplicate']);
+
+    // Phase 10 (PDF forms): design (create/move/resize/edit properties/
+    // duplicate/delete) is a real, independent `form_*` working-copy
+    // chain — a sibling to Phase 4's content objects and Phase 5's
+    // annotations, not a modification of either — see FormFieldService's
+    // docblock. fill/clear are separate, simpler operations against real
+    // AcroForm field values via pdftk — see FormFillService's docblock.
+    Route::get('/documents/{document}/form/fields', [DocumentFormController::class, 'index']);
+    Route::post('/documents/{document}/form/fields', [DocumentFormController::class, 'store']);
+    Route::patch('/documents/{document}/form/fields/{fieldId}', [DocumentFormController::class, 'update']);
+    Route::delete('/documents/{document}/form/fields/{fieldId}', [DocumentFormController::class, 'destroy']);
+    Route::post('/documents/{document}/form/fields/{fieldId}/duplicate', [DocumentFormController::class, 'duplicate']);
+    Route::post('/documents/{document}/form/fill', [DocumentFormController::class, 'fillForm']);
+    Route::post('/documents/{document}/form/clear', [DocumentFormController::class, 'clearForm']);
 
     // Phase 6 (scanning/image-import — SCAN/IMPORT -> REVIEW -> CLEAN ->
     // REORDER -> CREATE PDF): a scan session exists independently of any
