@@ -3,6 +3,7 @@
 namespace App\Domain\Editing\Services;
 
 use App\Exceptions\PageOperationException;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -69,7 +70,7 @@ class PdfContentEngine
         $pdf->AddFont('Pacifico', '', 'Pacifico-Regular.json', self::SIGNATURE_FONT_DIR);
 
         try {
-            $pageCount = $pdf->setSourceFile($sourcePath);
+            $pageCount = $pdf->setSourceFile($this->flattenFormFieldsIfPresent($sourcePath, dirname($outputPath)));
         } catch (\Throwable $e) {
             throw PageOperationException::processingFailed('could not read the source PDF for content editing: '.$e->getMessage());
         }
@@ -97,6 +98,41 @@ class PdfContentEngine
         if (@file_put_contents($outputPath, $bytes) === false) {
             throw PageOperationException::processingFailed('could not write the composed PDF.');
         }
+    }
+
+    /**
+     * Phase 15 integration-testing finding: if `$sourcePath` is the Forms
+     * chain's current output, it has real AcroForm field widgets living in
+     * each page's `/Annots` array with their visual appearance in a
+     * separate `/AP` stream (see FormFieldEngine's docblock). FPDI's
+     * `importPage()` below only imports a page's content stream — it never
+     * carries `/Annots` — so switching from Forms to this chain silently
+     * dropped form fields entirely, both interactively AND visually,
+     * unlike every other object type here (which draws as real
+     * content-stream operators FPDI happily imports). Flattening the
+     * source through `pdftk` first bakes each field's existing appearance
+     * into real page content before FPDI ever sees it, matching the same
+     * "other domains' output becomes an inert flat base" convention this
+     * engine already applies to Content/Annotation objects. A cheap
+     * `dump_data_fields` probe skips this entirely for the overwhelmingly
+     * common case (a source with no form fields at all); any pdftk failure
+     * falls back to the original path rather than failing the whole
+     * compose over a cosmetic-preservation step.
+     */
+    private function flattenFormFieldsIfPresent(string $sourcePath, string $scratchDir): string
+    {
+        $probe = Process::timeout(15)->run(['pdftk', $sourcePath, 'dump_data_fields']);
+        if (! $probe->successful() || trim($probe->output()) === '') {
+            return $sourcePath;
+        }
+
+        $flattened = $scratchDir.'/flattened-source.pdf';
+        $result = Process::timeout(30)->run(['pdftk', $sourcePath, 'output', $flattened, 'flatten']);
+        if (! $result->successful() || ! is_file($flattened)) {
+            return $sourcePath;
+        }
+
+        return $flattened;
     }
 
     private function drawObject(RotatingFpdi $pdf, float $pageHeightPt, array $object): void

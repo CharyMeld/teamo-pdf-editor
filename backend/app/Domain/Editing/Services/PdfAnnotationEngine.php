@@ -3,6 +3,7 @@
 namespace App\Domain\Editing\Services;
 
 use App\Exceptions\PageOperationException;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -45,7 +46,7 @@ class PdfAnnotationEngine
 
     /**
      * @param  array<int, list<array{annotationId: string, type: string, x: float, y: float, width: float, height: float, rotation: float, zIndex: int, active: bool, x2?: float, y2?: float, params: array}>>  $annotationsByPage
-     *                                                                                                                                                                                                                Keyed by 1-based page number. Only `active === true` entries are drawn.
+     *                                                                                                                                                                                                                              Keyed by 1-based page number. Only `active === true` entries are drawn.
      */
     public function compose(string $sourcePath, string $outputPath, array $annotationsByPage): void
     {
@@ -57,7 +58,7 @@ class PdfAnnotationEngine
         $pdf->SetMargins(0, 0, 0);
 
         try {
-            $pageCount = $pdf->setSourceFile($sourcePath);
+            $pageCount = $pdf->setSourceFile($this->flattenFormFieldsIfPresent($sourcePath, dirname($outputPath)));
         } catch (\Throwable $e) {
             throw PageOperationException::processingFailed('could not read the source PDF for annotation composing: '.$e->getMessage());
         }
@@ -85,6 +86,30 @@ class PdfAnnotationEngine
         if (@file_put_contents($outputPath, $bytes) === false) {
             throw PageOperationException::processingFailed('could not write the annotated PDF.');
         }
+    }
+
+    /**
+     * See `PdfContentEngine::flattenFormFieldsIfPresent()` — identical
+     * Phase 15 finding and fix: FPDI's `importPage()` below never carries a
+     * page's `/Annots`, which is where AcroForm field widgets (and their
+     * `/AP` visual appearance) live, so switching from Forms to this chain
+     * silently dropped fields entirely. Flattening first bakes their
+     * appearance into real content before FPDI ever sees it.
+     */
+    private function flattenFormFieldsIfPresent(string $sourcePath, string $scratchDir): string
+    {
+        $probe = Process::timeout(15)->run(['pdftk', $sourcePath, 'dump_data_fields']);
+        if (! $probe->successful() || trim($probe->output()) === '') {
+            return $sourcePath;
+        }
+
+        $flattened = $scratchDir.'/flattened-source.pdf';
+        $result = Process::timeout(30)->run(['pdftk', $sourcePath, 'output', $flattened, 'flatten']);
+        if (! $result->successful() || ! is_file($flattened)) {
+            return $sourcePath;
+        }
+
+        return $flattened;
     }
 
     private function drawAnnotation(AnnotatingFpdi $pdf, float $pageHeightPt, array $object): void
