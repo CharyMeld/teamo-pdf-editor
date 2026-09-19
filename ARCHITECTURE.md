@@ -2091,3 +2091,177 @@ cancel-button test (verified at the API level instead — see backend
 section — for the same reliable-timing reason noted in Phase 6's
 frontend section for drag-reorder). No conversion, compression, signing,
 AI, or forms.
+
+## Phase 8 (backend) — document conversion engine (2026-09-19)
+
+CONVERT's remaining commands are now real, split along the same "does
+this touch an existing Document or create a new one" line the app already
+uses elsewhere:
+
+- **FROM an existing PDF** (`convert.toText`, `convert.toImage`,
+  `convert.toWord`): output is a downloadable non-PDF file (or a `.zip` of
+  images) — never a new `Document` row, since `Document` is fixed to
+  `mime_type: application/pdf` everywhere in this app's model.
+- **TO a new PDF** (`convert.fromOffice`): output IS a new real `Document`,
+  reusing `WorkingCopyManager::createDocumentFromFile()` **verbatim** —
+  the exact method Phase 6's `ImagesToPdfService` and Phase 3's
+  Extract/Save-As already share.
+
+### Real engine research done before writing any code
+
+Following this project's established discipline (Phase 4's
+`AVAILABLE_FONTS`, Phase 6's Imagick check, Phase 7's
+`installedLanguages()`) — verify, don't assume, before promising a format:
+no LibreOffice/`soffice`/`unoconv` exists on this host. `pandoc` (already
+installed) reads `.docx` but has **no PDF input support at all** and
+**no `.xlsx`/`.pptx` input support at all**; producing PDF output needs an
+external `--pdf-engine`, none of which existed. **`wkhtmltopdf` was
+installed specifically for this phase** (`apt-get install wkhtmltopdf`,
+confirmed as a valid pandoc PDF engine) — a real decision point put to the
+user directly, since it both changes scope and needs a system package
+install: ship real `.docx` → PDF only, honestly re-labeling
+`convert.fromOffice` away from its old "Word, Excel, or PowerPoint"
+wording rather than advertising formats nothing on this host can read.
+
+Two pipelines were verified end-to-end with real files *before* being
+wired into `ConversionEngine`:
+- `pandoc <docx> -o <pdf> --pdf-engine=wkhtmltopdf` → a real,
+  `qpdf --check`-clean, `pdftotext`-extractable PDF (~1.2s for a small
+  document).
+- `pdftohtml -s -noframes -i <pdf> <out>` (poppler-utils — same package as
+  `pdftoppm`/`pdftotext`/`pdfinfo`, a core dependency since Phase 2) piped
+  into `pandoc <out>.html -o <docx>` → a real, valid "Microsoft Word 2007+"
+  file. The `-i` (ignore images) flag matters: without it, `pdftohtml`
+  rasterizes each page as a full-page background image with text merely
+  overlaid — technically "real extractable text" but not remotely
+  editable. With `-i`, each text run becomes a real (if absolutely-
+  positioned) paragraph pandoc reads as flowing text. This is honestly a
+  **text/paragraph-level conversion, not pixel-perfect layout
+  preservation** — no tables/columns/embedded-image reconstruction — and
+  the frontend says so explicitly rather than implying otherwise.
+
+### `ConversionEngine` / `ConversionService` — FROM an existing PDF
+
+`ConversionEngine` (`app/Domain/Conversion/Services/`) wraps each CLI step
+with the exact `Process::timeout()->run()` convention `PdfPageEngine`/
+`OcrEngine` already established. One real, non-obvious gotcha caught
+before shipping: `wkhtmltopdf` can exit 0 while having produced a broken
+or empty PDF (a real Qt-headless-renderer failure mode, distinct from
+qpdf's well-defined exit codes) — `officeToPdf()` verifies the result with
+`pdfinfo` before returning, never trusting the exit code alone.
+
+`ConversionService` mirrors `OcrService`'s per-job shape (reads the
+document's CURRENT working state via
+`WorkingCopyManager::currentAbsolutePath()` — same source Phase 7's OCR
+reads from, so a conversion reflects pending unsaved edits, not just the
+last Save) but never splices anything back into the working copy — the
+result is written to `{document uuid}/conversions/{job id}/output.<ext>`
+and the job's `payload` records `{outputPath, downloadFilename, mimeType,
+sizeBytes}` for the download endpoint to stream. `toImages` reports real
+per-page progress like OCR; `toText`/`toWord` are honest two-stage 50%/
+100% (single-pass whole-document operations, not fake granular ticks).
+Runs as a queued job (`RunConversion`, mirrors `RunOcr`'s shape exactly).
+
+### `OfficeToPdfService` — TO a new PDF, and why it's synchronous
+
+Unlike the FROM-PDF conversions, `OfficeToPdfService::convert()` runs the
+actual `pandoc`+`wkhtmltopdf` conversion **synchronously within the
+request** — measured at ~1.2s for a real test document during this
+phase's own testing, the same "fast enough" bar Phase 6's FPDF image
+assembly already cleared for the identical "brand new PDF, not a
+mutation" shape. It then hands the produced PDF file straight to
+`WorkingCopyManager::createDocumentFromFile()` — reused verbatim, not
+reimplemented — which still creates the `Document`, `DocumentVersion`,
+and dispatches the real, existing `GenerateDocumentThumbnails` job itself,
+so the resulting document goes through the *exact* `processing` → `ready`
+lifecycle every other upload already does. Real content-sniff via `finfo`
+accepts only `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+— legacy binary `.doc` is rejected honestly (pandoc's docx reader can't
+read it), matching Phase 6's `ScanSessionService::assertRealImage()`
+pattern of never trusting a client-supplied extension.
+
+### API
+
+```
+POST /documents/{document}/conversions                    {format: 'txt'|'images'|'docx', pages?, imageFormat?} -> {jobId}
+GET  /documents/{document}/conversions/jobs/{job}          -> {status, progressPercent, errorMessage, payload}
+GET  /documents/{document}/conversions/jobs/{job}/download -> streams the real file (Content-Disposition: attachment, 404 unless completed)
+POST /office-conversions                                    (multipart .docx) -> {document: <DocumentSummary>}
+```
+
+### Verified working (2026-09-19)
+
+Against the live `php artisan serve` + `queue:work` stack, via `curl` with
+a real Sanctum session: a real multi-page mixed-content PDF converted to
+`.txt` (content matched `pdftotext` directly), to a page-scoped `.zip` of
+real PNGs (`unzip -l` + `file` confirmed valid images, correct pages only),
+and to a real `.docx` (`file` reports "Microsoft Word 2007+", `pandoc -t
+plain` round-trip shows the real extracted text); a real `.docx` uploaded
+through `office-conversions` reaching real `status: "ready"` with correct
+`page_count: 1` through the unmodified Phase 2 pipeline; a non-`.docx`
+file cleanly rejected (422); an out-of-range page selection cleanly
+rejected (422); a nonexistent job download cleanly 404s. Every output
+verified as a real file on disk, never the API response alone.
+
+### What Phase 8 (backend) does NOT include
+
+Excel/PowerPoint → PDF (`.xlsx`/`.pptx` — nothing on this host can reliably
+read either format; `convert.fromOffice` is honestly Word-only). Layout-
+preserving PDF → Word (text/paragraph-level only, documented above).
+Conversion cancellation (the brief didn't ask for it here the way it
+explicitly did for OCR). The frontend (delivered in the same session — see
+below). No compression, signing, AI, or forms.
+
+## Phase 8 (frontend) — real conversion UI (2026-09-19)
+
+Adds a new `convert.toText` command (PDF → TXT was in the master phase
+brief but had no registry entry at all) and flips `convert.toWord`/
+`convert.toImage`/`convert.fromOffice` from `UNIMPLEMENTED` to real,
+alongside the already-real `convert.fromImage` from Phase 6.
+
+`frontend/src/conversion/useConversionWorkflow.tsx` mirrors
+`useOcrWorkflow`'s shape (reads `useOpenDocument`/`useWorkingDocument`/
+`usePageSelection` directly, real percentage progress polled from
+`document_jobs`) but simpler: since the result is a standalone
+downloadable file rather than a working-copy mutation, there's no
+`applyOperationResult`/`reloadPdfDocument` step and no cancel — completion
+just exposes a real download URL. One provider deliberately bundles two
+distinct concerns (the FROM-PDF export flow and the TO-PDF office-upload
+flow) rather than a second context, the same way `useWorkingDocument`
+already bundles several dialogs' state together.
+
+`ExportDialog` is one dialog shared by all three FROM-PDF commands,
+parameterized by `useConversionWorkflow.format` — scope radios (current/
+selected/all, images format only) + PNG/JPEG choice (images only) +
+progress bar + a real "Download" link once `completed`, with the Word
+export's copy explicitly stating the text/paragraph-level limitation
+rather than implying pixel-perfect fidelity. `OfficeToPdfDialog` mirrors
+`CreatePdfFromImagesDialog`'s simplicity: pick a `.docx`, upload, then
+`openExisting()` the result — the existing `processing`-poll in
+`useOpenDocument` takes over from there with zero new polling code, since
+`OfficeToPdfService` reuses the real Phase 2 ingest pipeline server-side.
+
+### Testing
+
+Playwright against `google-chrome-stable` (per this project's established
+technique), driven against the real live stack end-to-end: opened a real
+3-page mixed PDF, ran all three FROM-PDF conversions from the CONVERT tab
+with real progress visible, and captured each real browser download
+(`context.waitForEvent("download")`) — the `.txt`/`.zip`/`.docx` files
+were saved to disk and independently verified (`pdftotext`-matching
+content, `unzip -l` + `file`-valid PNGs for the correct pages only, `file`
++ `pandoc -t plain` for the Word export); then uploaded a real `.docx`
+through "Create PDF from Word Document" and confirmed it opened as a new,
+fully-rendered document in the main editor. One test-harness-only gotcha
+worth recording: `window.open(url, "_blank")`-triggered downloads don't
+reliably surface as a distinct Playwright `page` — capturing the
+context-level `"download"` event directly (rather than chasing a new
+page/tab first) is what actually worked.
+
+### What Phase 8 (frontend) does NOT include
+
+OCR-style Review Results-type in-app viewing of the converted content —
+these are real files handed off via a normal browser download, not
+something to keep re-reading in the app (unlike Phase 7's OCR text, which
+was already loaded client-side via pdf.js). No compression, signing, AI,
+or forms.

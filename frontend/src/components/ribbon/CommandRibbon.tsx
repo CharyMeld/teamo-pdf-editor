@@ -8,6 +8,7 @@ import { useOpenDocument } from "../../hooks/useOpenDocument";
 import { useOrganizeRunHandlers } from "../../hooks/useOrganizeRunHandlers";
 import { BREAKPOINTS, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useWorkingDocument } from "../../hooks/useWorkingDocument";
+import { useConversionWorkflow } from "../../conversion/useConversionWorkflow";
 import { useOcrWorkflow } from "../../ocr/useOcrWorkflow";
 import { useScanWorkflow } from "../../scanning/useScanWorkflow";
 import IconButton from "../ui/IconButton";
@@ -61,6 +62,7 @@ export default function CommandRibbon() {
   const annotations = useAnnotationRunHandlers();
   const scanWorkflow = useScanWorkflow();
   const ocrWorkflow = useOcrWorkflow();
+  const conversionWorkflow = useConversionWorkflow();
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const [sheetOpen, setSheetOpen] = useState(false);
   useUndoRedoShortcuts();
@@ -83,6 +85,10 @@ export default function CommandRibbon() {
     "ocr.run": ocrWorkflow.openDialog,
     "ocr.language": ocrWorkflow.openDialog,
     "ocr.reviewResults": ocrWorkflow.openResults,
+    "convert.toText": () => conversionWorkflow.openDialog("txt"),
+    "convert.toImage": () => conversionWorkflow.openDialog("images"),
+    "convert.toWord": () => conversionWorkflow.openDialog("docx"),
+    "convert.fromOffice": conversionWorkflow.openOfficeDialog,
     ...organize.runHandlers,
     ...contentEditor.runHandlers,
     ...annotations.runHandlers,
@@ -93,6 +99,13 @@ export default function CommandRibbon() {
     ...(view.canGoPrev ? {} : { "view.prevPage": "No document open" }),
     ...(documentReady ? {} : { "ocr.run": "No document open", "ocr.language": "No document open" }),
     ...(ocrWorkflow.summary ? {} : { "ocr.reviewResults": "Run OCR first" }),
+    ...(documentReady
+      ? {}
+      : {
+          "convert.toText": "No document open",
+          "convert.toImage": "No document open",
+          "convert.toWord": "No document open",
+        }),
     ...organize.disabledReasons,
     ...contentEditor.disabledReasons,
     ...annotations.disabledReasons,

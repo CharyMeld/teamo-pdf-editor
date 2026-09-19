@@ -837,3 +837,59 @@ export async function getOcrJob(id: string, jobId: number): Promise<OcrJobState>
 export async function cancelOcrJob(id: string, jobId: number): Promise<void> {
   await api.post(`/documents/${id}/ocr/jobs/${jobId}/cancel`);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 8 — document conversion. FROM an existing PDF (PDF -> TXT / Images /
+// Word) is a queued job polled exactly like Phase 7's OCR — see
+// ConversionService's docblock server-side for why the result is a
+// standalone downloadable file rather than a working-copy mutation. TO a
+// new PDF (a real .docx Word document -> PDF) creates a brand-new
+// Document, same shape as Phase 6's Images -> PDF.
+
+export type ConversionFormat = "txt" | "images" | "docx";
+export type ConversionJobStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface ConversionResult {
+  outputPath: string;
+  downloadFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface ConversionJobState {
+  status: ConversionJobStatus;
+  progressPercent: number | null;
+  errorMessage: string | null;
+  payload: ConversionResult | null;
+}
+
+export async function startConversion(
+  id: string,
+  format: ConversionFormat,
+  pages: number[] | "all" | undefined,
+  imageFormat: "png" | "jpeg" | undefined,
+): Promise<{ jobId: number }> {
+  const { data } = await api.post<{ jobId: number }>(`/documents/${id}/conversions`, {
+    format,
+    pages,
+    imageFormat,
+  });
+  return data;
+}
+
+export async function getConversionJob(id: string, jobId: number): Promise<ConversionJobState> {
+  const { data } = await api.get<ConversionJobState>(`/documents/${id}/conversions/jobs/${jobId}`);
+  return data;
+}
+
+/** URL for the real produced file — navigating to it triggers a real browser download (Content-Disposition: attachment), no client-side blob handling needed. */
+export function conversionDownloadUrl(id: string, jobId: number): string {
+  return `${API_BASE_URL}/documents/${id}/conversions/jobs/${jobId}/download`;
+}
+
+export async function convertOfficeToPdf(file: File): Promise<DocumentSummary> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<{ document: DocumentSummary }>("/office-conversions", form);
+  return data.document;
+}

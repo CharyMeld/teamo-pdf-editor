@@ -8,6 +8,7 @@ import { OpenDocumentProvider } from "../hooks/useOpenDocument";
 import { PageSelectionProvider } from "../hooks/usePageSelection";
 import { PanelVisibilityProvider } from "../hooks/usePanelVisibility";
 import { WorkingDocumentProvider } from "../hooks/useWorkingDocument";
+import { ConversionWorkflowProvider } from "../conversion/useConversionWorkflow";
 import { OcrWorkflowProvider } from "../ocr/useOcrWorkflow";
 import { ScanWorkflowProvider } from "../scanning/useScanWorkflow";
 
@@ -39,7 +40,13 @@ export default function WorkspaceProviders({ children }: { children: ReactNode }
                           copy (applyOperationResult), and page selection —
                           sits inside all three for that reason. */}
                       <OcrWorkflowProvider>
-                        <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                        {/* Phase 8 (conversion): same dependency shape as
+                            OCR — the open document, working copy
+                            (pageCount), and page selection (images-format
+                            scope). */}
+                        <ConversionWorkflowProvider>
+                          <PanelVisibilityProvider>{children}</PanelVisibilityProvider>
+                        </ConversionWorkflowProvider>
                       </OcrWorkflowProvider>
                     </PageSelectionProvider>
                   </AnnotationsProvider>

@@ -512,13 +512,26 @@ export const REGISTRY: Command[] = [
 
   // ---- CONVERT --------------------------------------------------------------
   {
+    id: "convert.toText",
+    label: "Convert to Text",
+    description: "Extract the document's text as a .txt file",
+    tab: "CONVERT",
+    group: "Export",
+    keywords: ["txt", "extract text", "plain text"],
+    // Real as of Phase 8 (document conversion) — see
+    // conversion/useConversionWorkflow and ExportDialog.
+    status: "available",
+  },
+  {
     id: "convert.toWord",
     label: "Convert to Word",
     description: "Export the document as a Word file",
     tab: "CONVERT",
     group: "Export",
     keywords: ["docx", "word document"],
-    status: UNIMPLEMENTED,
+    // Real as of Phase 8 — text/paragraph-level conversion (pdftohtml ->
+    // pandoc), not pixel-perfect layout preservation; ExportDialog says so.
+    status: "available",
   },
   {
     id: "convert.toImage",
@@ -527,7 +540,9 @@ export const REGISTRY: Command[] = [
     tab: "CONVERT",
     group: "Export",
     keywords: ["png", "jpg", "image export"],
-    status: UNIMPLEMENTED,
+    // Real as of Phase 8 — see conversion/useConversionWorkflow and
+    // ExportDialog (scope + PNG/JPEG choice, zipped for download).
+    status: "available",
   },
   {
     id: "convert.fromImage",
@@ -545,12 +560,18 @@ export const REGISTRY: Command[] = [
   },
   {
     id: "convert.fromOffice",
-    label: "Create PDF from Office File",
-    description: "Convert a Word, Excel, or PowerPoint file to PDF",
+    label: "Create PDF from Word Document",
+    // Deliberately narrowed from "Word, Excel, or PowerPoint" — Phase 8
+    // verified no engine on this host can reliably read .xlsx/.pptx (no
+    // LibreOffice/soffice/unoconv, and pandoc has no input support for
+    // either); only real .docx -> PDF (pandoc + wkhtmltopdf) is real here.
+    description: "Convert a real .docx Word document to PDF",
     tab: "CONVERT",
     group: "Import",
-    keywords: ["docx", "xlsx", "pptx"],
-    status: UNIMPLEMENTED,
+    keywords: ["docx", "word to pdf"],
+    // Real as of Phase 8 — see conversion/useConversionWorkflow and
+    // OfficeToPdfDialog.
+    status: "available",
   },
 
   // ---- COMPRESS --------------------------------------------------------------
