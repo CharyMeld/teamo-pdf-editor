@@ -20,8 +20,14 @@ class OfficeConversionController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        // Phase 14 hardening: previously accepted any file type/size at
+        // the validation layer — OfficeToPdfService does its own real
+        // content-sniffed check regardless, but this rejects an
+        // obviously-wrong upload earlier and consistently with every
+        // other upload endpoint's shape.
+        $maxKb = (int) config('documents.max_upload_mb', 100) * 1024;
         $request->validate([
-            'file' => ['required', 'file'],
+            'file' => ['required', 'file', 'mimes:docx', "max:{$maxKb}"],
         ]);
 
         $document = $this->service->convert($request->file('file'), $request->user());

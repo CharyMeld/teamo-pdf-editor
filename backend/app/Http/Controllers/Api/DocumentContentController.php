@@ -91,7 +91,9 @@ class DocumentContentController extends Controller
         ]);
 
         if ($base['type'] === 'image') {
-            $request->validate(['file' => ['required', 'file', 'image']]);
+            // Phase 14 hardening: previously no app-level size limit here.
+            $maxKb = (int) config('documents.max_image_upload_mb', 20) * 1024;
+            $request->validate(['file' => ['required', 'file', 'image', "max:{$maxKb}"]]);
             $base['params'] = $request->validate([
                 'params.isSignature' => ['sometimes', 'boolean'],
             ])['params'] ?? [];

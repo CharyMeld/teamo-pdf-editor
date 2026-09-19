@@ -35,7 +35,10 @@ class DocumentController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Document::where('user_id', $request->user()->id);
+        // Phase 14 hardening: `withCount('versions')` avoids an N+1 —
+        // one extra COUNT query per document — that `lifecycleState()`
+        // would otherwise run for every `ready`, no-pending-edits row.
+        $query = Document::where('user_id', $request->user()->id)->withCount('versions');
 
         $search = trim((string) $request->query('q', ''));
         if ($search !== '') {

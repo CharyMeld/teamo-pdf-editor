@@ -92,6 +92,11 @@ class Document extends Model
      */
     public function lifecycleState(): string
     {
+        // `versions_count` is used when eager-loaded via
+        // `->withCount('versions')` (see DocumentController::index(),
+        // Phase 14 hardening — avoids an N+1 COUNT query per document
+        // in a list response); falls back to a real query for
+        // single-document contexts (show/duplicate) where it isn't.
         return match ($this->status) {
             'uploading', 'validating', 'processing' => 'processing',
             'failed' => 'failed',
@@ -99,7 +104,7 @@ class Document extends Model
             'password_protected' => 'password_protected',
             default => $this->hasPendingEdits()
                 ? 'working'
-                : ($this->versions()->count() > 1 ? 'saved' : 'original'),
+                : (($this->versions_count ?? $this->versions()->count()) > 1 ? 'saved' : 'original'),
         };
     }
 

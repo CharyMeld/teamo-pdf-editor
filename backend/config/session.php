@@ -169,7 +169,13 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    // Phase 14 hardening: default to true in production rather than
+    // leaving this `null`/falsy unless an operator remembers to set it
+    // explicitly — an unset SESSION_SECURE_COOKIE previously meant a
+    // real production deploy would silently send session cookies over
+    // plain HTTP. Local/testing behavior is unchanged (APP_ENV is
+    // "local" today, so this still evaluates to `false`).
+    'secure' => env('SESSION_SECURE_COOKIE', env('APP_ENV') === 'production'),
 
     /*
     |--------------------------------------------------------------------------

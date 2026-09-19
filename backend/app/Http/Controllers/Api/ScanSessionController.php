@@ -43,9 +43,12 @@ class ScanSessionController extends Controller
     public function addImages(Request $request, ScanSession $session): JsonResponse
     {
         $this->authorizeOwner($request, $session);
+        // Phase 14 hardening: previously no app-level size limit here at
+        // all, just PHP's ini backstop.
+        $maxKb = (int) config('documents.max_image_upload_mb', 20) * 1024;
         $request->validate([
             'images' => ['required', 'array', 'min:1'],
-            'images.*' => ['required', 'file'],
+            'images.*' => ['required', 'file', "max:{$maxKb}"],
         ]);
 
         $created = $this->sessions->addImages($session, $request->file('images'));

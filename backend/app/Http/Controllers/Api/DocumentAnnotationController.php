@@ -100,7 +100,9 @@ class DocumentAnnotationController extends Controller
         ]);
 
         if ($base['type'] === 'stamp' && $request->hasFile('file')) {
-            $request->validate(['file' => ['required', 'file', 'image']]);
+            // Phase 14 hardening: previously no app-level size limit here.
+            $maxKb = (int) config('documents.max_image_upload_mb', 20) * 1024;
+            $request->validate(['file' => ['required', 'file', 'image', "max:{$maxKb}"]]);
         }
 
         $paramsRules = match ($base['type']) {
