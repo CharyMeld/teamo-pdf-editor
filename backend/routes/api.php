@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\ConversionController;
 use App\Http\Controllers\Api\DevAuthController;
 use App\Http\Controllers\Api\DocumentAnnotationController;
 use App\Http\Controllers\Api\DocumentContentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
 use App\Http\Controllers\Api\OcrController;
+use App\Http\Controllers\Api\OfficeConversionController;
 use App\Http\Controllers\Api\ScanSessionController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -118,4 +120,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{document}/ocr', [OcrController::class, 'store']);
     Route::get('/documents/{document}/ocr/jobs/{job}', [OcrController::class, 'show']);
     Route::post('/documents/{document}/ocr/jobs/{job}/cancel', [OcrController::class, 'cancel']);
+
+    // Phase 8 (document conversion): FROM an existing PDF (PDF -> TXT /
+    // Images / Word) is a queued job polled exactly like Phase 7's OCR —
+    // see ConversionService's docblock for why the result is a standalone
+    // downloadable file rather than a working-copy mutation. TO a new PDF
+    // (a real .docx Word document -> PDF) creates a brand-new Document,
+    // same shape as Phase 6's Images -> PDF — see OfficeToPdfService's
+    // docblock for why that one runs synchronously.
+    Route::post('/documents/{document}/conversions', [ConversionController::class, 'store']);
+    Route::get('/documents/{document}/conversions/jobs/{job}', [ConversionController::class, 'show']);
+    Route::get('/documents/{document}/conversions/jobs/{job}/download', [ConversionController::class, 'download']);
+    Route::post('/office-conversions', [OfficeConversionController::class, 'store']);
 });

@@ -11,4 +11,10 @@ return [
     // Phase 7 (OCR): higher than thumbnail DPI on purpose — real text
     // recognition accuracy needs more detail than a UI thumbnail does.
     'ocr_dpi' => (int) env('DOCUMENTS_OCR_DPI', 300),
+
+    // Phase 8 (conversion): PDF -> Images export DPI — higher than the
+    // thumbnail DPI since these are meant to be used as real standalone
+    // images, not just a UI preview, but lower than OCR's 300 since
+    // there's no recognition accuracy to protect here.
+    'conversion_image_dpi' => (int) env('DOCUMENTS_CONVERSION_IMAGE_DPI', 150),
 ];
