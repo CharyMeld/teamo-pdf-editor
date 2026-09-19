@@ -188,6 +188,45 @@ class DocumentEditController extends Controller
         return response()->json(['data' => $this->summarize($newDocument)], 201);
     }
 
+    /**
+     * Phase 7 (OCR): real bytes of the document's CURRENT state — the
+     * pending working-copy step's file if one exists, otherwise the same
+     * saved version `DocumentController::file()` serves — via
+     * `WorkingCopyManager::currentAbsolutePath()`, the same resolver every
+     * other working-copy read already uses. Added because
+     * `DocumentController::file()` only ever serves `currentVersion` (the
+     * last SAVE), so pdf.js's canvas/search-index reload after OCR
+     * commits a step would otherwise keep re-fetching the exact same
+     * pre-OCR bytes forever, until the user explicitly saves — confirmed
+     * empirically with a real OCR run during Phase 7 testing before this
+     * endpoint existed. Every other phase's edits never needed this
+     * because they render through independent overlay layers, not a
+     * reloaded pdf.js document (see ARCHITECTURE.md's Phase 7 section).
+     *
+     * `Cache-Control: no-store` overrides Laravel's `response()->file()`
+     * default of `public` (with a `Last-Modified` the browser treats as
+     * heuristically fresh) — this URL is NOT stable content like
+     * `DocumentController::file()`'s saved version; the same URL can
+     * legitimately return different bytes across calls as working-copy
+     * steps commit. Confirmed empirically: without this header, Chrome
+     * served the pre-OCR bytes from its HTTP cache on `reloadPdfDocument`'s
+     * re-fetch of the identical URL, so pdf.js's search index kept
+     * finding nothing on the just-OCR'd page — a real caching bug, not a
+     * pdf.js/tesseract issue (the working file on disk was already
+     * correct at that point, verified separately via `pdftotext`).
+     */
+    public function workingFile(Request $request, Document $document): BinaryFileResponse
+    {
+        $this->authorizeOwner($request, $document);
+
+        $absolutePath = $this->working->currentAbsolutePath($document);
+
+        return response()->file($absolutePath, [
+            'Content-Type' => 'application/pdf',
+            'Cache-Control' => 'no-store, must-revalidate',
+        ]);
+    }
+
     public function workingPages(Request $request, Document $document): JsonResponse
     {
         $this->authorizeOwner($request, $document);

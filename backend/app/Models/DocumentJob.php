@@ -14,6 +14,7 @@ class DocumentJob extends Model
         'document_id',
         'job_type',
         'status',
+        'cancel_requested',
         'progress_percent',
         'error_message',
         'payload',
@@ -25,6 +26,7 @@ class DocumentJob extends Model
     protected function casts(): array
     {
         return [
+            'cancel_requested' => 'boolean',
             'progress_percent' => 'integer',
             'payload' => 'array',
             'started_at' => 'datetime',

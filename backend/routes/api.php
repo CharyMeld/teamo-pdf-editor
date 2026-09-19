@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\DocumentAnnotationController;
 use App\Http\Controllers\Api\DocumentContentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentEditController;
+use App\Http\Controllers\Api\OcrController;
 use App\Http\Controllers\Api\ScanSessionController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -54,6 +55,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Phase 3 (ORGANIZE): real page-management operations against the
     // document's working copy — see WorkingCopyManager's docblock and
     // ARCHITECTURE.md's Phase 3 section.
+    Route::get('/documents/{document}/working/file', [DocumentEditController::class, 'workingFile']);
     Route::get('/documents/{document}/working/pages', [DocumentEditController::class, 'workingPages']);
     Route::get('/documents/{document}/working/pages/{pageNumber}/thumbnail', [DocumentEditController::class, 'workingThumbnail']);
     Route::post('/documents/{document}/operations/insert', [DocumentEditController::class, 'insert']);
@@ -106,4 +108,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/scan-sessions/{session}/images/{imageId}', [ScanSessionController::class, 'destroyImage']);
     Route::get('/scan-sessions/{session}/images/{imageId}/preview', [ScanSessionController::class, 'preview']);
     Route::post('/scan-sessions/{session}/create-pdf', [ScanSessionController::class, 'createPdf']);
+
+    // Phase 7 (OCR / searchable documents): recognizes text on scanned
+    // pages and splices it in as real, extractable page content via the
+    // same working-copy step mechanism as ORGANIZE — see OcrService's
+    // docblock and ARCHITECTURE.md's Phase 7 section. Runs as a queued
+    // job (RunOcr); the frontend polls jobs.show for progress/result.
+    Route::get('/documents/{document}/ocr/languages', [OcrController::class, 'languages']);
+    Route::post('/documents/{document}/ocr', [OcrController::class, 'store']);
+    Route::get('/documents/{document}/ocr/jobs/{job}', [OcrController::class, 'show']);
+    Route::post('/documents/{document}/ocr/jobs/{job}/cancel', [OcrController::class, 'cancel']);
 });
