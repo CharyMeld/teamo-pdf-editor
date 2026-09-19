@@ -123,6 +123,21 @@ export function AnnotationsProvider({ children }: { children: ReactNode }) {
   const [placementMode, setPlacementMode] = useState<PlacementMode>(null);
   const [pendingIsSignature, setPendingIsSignature] = useState(false);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({});
+  // Phase 14 hardening — see useContentObjects.tsx's matching comment:
+  // revoked only at the document boundary, not per-annotation-delete,
+  // since duplicateSelected() below reuses the same blob URL string
+  // for a duplicate's preview.
+  const imagePreviewUrlsRef = useRef(imagePreviewUrls);
+  useEffect(() => {
+    imagePreviewUrlsRef.current = imagePreviewUrls;
+  }, [imagePreviewUrls]);
+  useEffect(() => {
+    return () => {
+      Object.values(imagePreviewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      setImagePreviewUrls({});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
 
   const fetchGenerationRef = useRef(0);
   const selfCausedRevisionRef = useRef(false);

@@ -3239,3 +3239,107 @@ seeded dev user — "prepare for" multiple users means consistent
 (explicitly deferred as *future* in the phase's own brief). Any change
 to the real `status` column's meaning or values. Full security
 auditing (Phase 14's explicit job).
+
+## Phase 14 — Security, performance, and reliability hardening (2026-09-19)
+
+A production-hardening audit pass across the whole app (13 phases of
+history at this point), per the master spec's "AUDIT: ... PERFORMANCE:
+... produce a list of all identified issues and fix them" brief. Three
+parallel audits (access control/secrets/logging; injection/file-
+handling/XSS; performance/reliability) found **no high-severity
+issues** — the app's established patterns (Eloquent everywhere, array-
+form `Process::` calls, UUID-based storage paths, React's default
+escaping, try/finally scratch-dir cleanup, per-request ownership
+checks) held up consistently under direct inspection, not assumption.
+Six concrete, low-risk findings were fixed; two lower-value ones
+(duplicated auth-check implementations across 5 controllers vs. one
+shared trait; `duplicate()`'s synchronous file-copy, bounded by the
+existing 100MB cap) were explicitly left as-is per the user's chosen
+scope.
+
+### Fixes
+
+1. **Session cookie `secure` flag had no environment-aware default**
+   (`config/session.php`) — was `null`/falsy unless an operator
+   remembered to set it explicitly, meaning a real HTTPS production
+   deploy could silently ship sending session cookies over plain HTTP.
+   Now defaults to `env('APP_ENV') === 'production'`; local/testing
+   behavior is unchanged.
+2. **No app-level upload size limit on 4 endpoints** (scan-session
+   images, stamp annotation upload, content-editor image insert,
+   Office→PDF upload) — only the main PDF upload ever checked
+   `config('documents.max_upload_mb')`; the other four relied solely
+   on PHP's ini backstop. New `config('documents.max_image_upload_mb')`
+   (default 20MB) applied to the three image endpoints; the Office
+   upload uses the existing `max_upload_mb` (it's a full document).
+3. **`OfficeConversionController::store` accepted any file type** at
+   the validation layer (`['required', 'file']`, no `mimes:` rule) —
+   `OfficeToPdfService` still does its own real content-sniffed check
+   regardless, but this rejects an obviously-wrong upload earlier and
+   consistently with every other upload endpoint's shape. Added
+   `mimes:docx` + the size limit.
+4. **N+1 query in `GET /documents`** — `Document::lifecycleState()`
+   ran a fresh `COUNT` query (`versions()->count()`) for every `ready`,
+   no-pending-edits document in a list response, unbounded by
+   pagination. Fixed with `->withCount('versions')` in
+   `DocumentController::index()` and `$this->versions_count ?? $this->versions()->count()`
+   in `lifecycleState()` — uses the eager-loaded count in list context,
+   falls back to a real query in single-document contexts (`show()`,
+   `duplicate()`) where it isn't loaded.
+5. **Frontend blob-URL leak** — `useContentObjects.tsx`/
+   `useAnnotations.tsx` both called `URL.createObjectURL()` for
+   inserted images/stamps but never `revokeObjectURL()`, leaking for
+   the rest of the tab's life even after the object was deleted or the
+   document closed. Fixed by revoking all current preview URLs at the
+   document-identity boundary (`doc?.id` changing, via a ref-backed
+   effect cleanup) — **deliberately not per-object-delete**:
+   `duplicateSelected()` in both files reuses the exact same blob URL
+   string for a duplicate's preview, so a per-object revoke on delete
+   would have broken the sibling still referencing it (verified live:
+   duplicating an inserted image still renders 2 real `<img>` elements
+   sharing one URL, confirmed via Playwright).
+6. **pdf.js `PDFDocumentProxy` never destroyed** — `useOpenDocument.tsx`
+   replaced or cleared `pdfDoc` at three call sites without ever
+   calling `.destroy()` on the outgoing proxy, a real resource leak in
+   this persistent, no-full-reload SPA shell (repeated document
+   switches or `reloadPdfDocument()` calls each abandoned worker-side
+   resources). Fixed with a ref-backed `setPdfDoc` wrapper that
+   destroys the previous proxy whenever it's replaced, plus an
+   unmount cleanup. Found and fixed one more instance of the same bug
+   while in this code: a superseded in-flight load (the effect's own
+   `cancelled` guard) was dropping its resolved proxy without
+   destroying it either.
+
+### Testing
+
+A real dev-environment constraint discovered while verifying fix 2:
+this box's PHP CLI `upload_max_filesize` ini value is 2MB — far below
+both the new 20MB image limit and the existing 100MB PDF limit — so a
+genuine oversized HTTP upload can't reach Laravel's validation layer
+at all; it kills the connection (and, once, the `artisan serve`
+process itself) before PHP finishes receiving the request. Verified
+the fix instead via `tests/Feature/Phase14UploadLimitsTest.php`
+(6 tests) using `UploadedFile::fake()`, which injects a validator-
+level test double directly, bypassing PHP's real multipart pipeline —
+the only way to actually exercise this rule in this environment. That
+suite also needed a real, `qpdf`-clean single-page PDF fixture
+(`tests/Fixtures/minimal.pdf`, generated via FPDI) for its one happy-
+path case, since the full content-compose pipeline needs an actually
+parseable PDF, not a fake byte string.
+
+50 backend tests pass (44 existing + 6 new). Also found, while
+re-running the full suite after unrelated Phase 12 edits, a `settings`
+row (`ai.default_provider`) left over from this session's own earlier
+manual curl testing that was shadowing a "defaults to null" test
+expectation — cleaned up; a reminder that this project's shared dev
+database (no separate test DB is configured) accumulates real state
+from manual verification that periodically needs clearing.
+
+### What Phase 14 does NOT include
+
+Consolidating the duplicated `authorizeOwner()` implementations across
+5 controllers into the one shared trait (works correctly everywhere
+today; explicitly skipped as lower-value). Making `duplicate()`'s file
+copy asynchronous (bounded by the existing 100MB cap; explicitly
+skipped). Any new feature — this phase is hardening only, per its own
+brief ("do not add major new features").

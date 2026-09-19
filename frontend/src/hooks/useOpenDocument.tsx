@@ -107,8 +107,26 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
   const [unlocking, setUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
-  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pdfDoc, setPdfDocState] = useState<PDFDocumentProxy | null>(null);
   const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
+  // Phase 14 hardening: the outgoing pdf.js proxy was never `.destroy()`-ed
+  // when replaced or cleared — a real resource leak in this persistent,
+  // no-full-reload SPA shell (switching documents repeatedly, or
+  // reloadPdfDocument()'s OCR-driven reload, abandoned worker-side
+  // resources instead of releasing them). This ref-backed setter is used
+  // at every call site instead of the raw state setter.
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
+  const setPdfDoc = useCallback((next: PDFDocumentProxy | null) => {
+    const previous = pdfDocRef.current;
+    pdfDocRef.current = next;
+    setPdfDocState(next);
+    if (previous && previous !== next) void previous.destroy();
+  }, []);
+  useEffect(() => {
+    return () => {
+      void pdfDocRef.current?.destroy();
+    };
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchIndexState, setSearchIndexState] = useState<SearchIndexState>("idle");
@@ -148,7 +166,7 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
     setActiveMatchIndex(0);
     setUnlockError(null);
     view.closeDocument();
-  }, [stopPolling, view]);
+  }, [stopPolling, view, setPdfDoc]);
 
   const loadPagesQuietly = useCallback(async (id: string) => {
     try {
@@ -223,7 +241,7 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [loadPagesQuietly, pollUntilSettled, view],
+    [loadPagesQuietly, pollUntilSettled, view, setPdfDoc],
   );
 
   const uploadAndOpen = useCallback(
@@ -301,7 +319,14 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
 
     loadPdfDocument({ url: workingFileUrl(document.id), password: passwordRef.current })
       .promise.then((proxy) => {
-        if (cancelled) return;
+        // A superseded load (this effect already cleaned up before the
+        // promise settled) must still destroy the proxy it just loaded
+        // instead of silently dropping it — otherwise it leaks exactly
+        // like the unguarded replacement case `setPdfDoc` itself fixes.
+        if (cancelled) {
+          void proxy.destroy();
+          return;
+        }
         setPdfDoc(proxy);
         setPdfLoadError(null);
       })
@@ -313,7 +338,7 @@ export function OpenDocumentProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [document]);
+  }, [document, setPdfDoc]);
 
   useEffect(() => {
     return loadPdfDoc();

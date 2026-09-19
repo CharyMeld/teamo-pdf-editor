@@ -124,6 +124,23 @@ export function ContentObjectsProvider({ children }: { children: ReactNode }) {
   const [placementMode, setPlacementMode] = useState<PlacementMode>(null);
   const [pendingIsSignature, setPendingIsSignature] = useState(false);
   const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({});
+  // Phase 14 hardening: `imagePreviewUrls` blob URLs were never revoked,
+  // leaking for the rest of the tab's life even after the object was
+  // deleted or the document closed. Revoked only at the document
+  // boundary below, not per-object-delete — `duplicateSelected()` below
+  // reuses the SAME blob URL string for a duplicate's preview, so a
+  // per-object revoke would break the sibling still referencing it.
+  const imagePreviewUrlsRef = useRef(imagePreviewUrls);
+  useEffect(() => {
+    imagePreviewUrlsRef.current = imagePreviewUrls;
+  }, [imagePreviewUrls]);
+  useEffect(() => {
+    return () => {
+      Object.values(imagePreviewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      setImagePreviewUrls({});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
 
   const fetchGenerationRef = useRef(0);
   // Set right before a mutation THIS hook performed bumps
